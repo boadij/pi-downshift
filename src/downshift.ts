@@ -202,10 +202,8 @@ function coreDeps(pi: ExtensionAPI, ctx: ExtensionContext) {
       runtime.state = next;
       saveState(pi);
     },
-    sendUserMessage: (
-      prompt: string,
-      options?: { deliverAs: "followUp" | "steer" },
-    ) => pi.sendUserMessage(prompt, options),
+    sendUserMessage: (prompt: string, options?: { deliverAs: "steer" }) =>
+      pi.sendUserMessage(prompt, options),
     switchToTarget: (target: ModelTarget, position: Position, reason: string) =>
       switchToTarget(pi, ctx, target, position, reason),
     updateStatus: (config?: DownshiftConfig) => updateStatus(ctx, config),
@@ -435,7 +433,12 @@ export default function downshift(pi: ExtensionAPI): void {
   });
 
   pi.on("context", async (_event, ctx) => {
-    await maybeDownshift(coreDeps(pi, ctx), runtime, ctx);
+    await maybeDownshift(
+      coreDeps(pi, ctx),
+      runtime,
+      ctx,
+      ctx.isIdle() ? "immediate" : "steer",
+    );
   });
 
   pi.on("before_agent_start", async (event, ctx) => {
@@ -490,7 +493,12 @@ export default function downshift(pi: ExtensionAPI): void {
               ? { ...current, thinkingLevel: pi.getThinkingLevel() }
               : runtime.state.capturedPremium,
         });
-        await maybeDownshift(coreDeps(pi, ctx), runtime, ctx);
+        await maybeDownshift(
+          coreDeps(pi, ctx),
+          runtime,
+          ctx,
+          ctx.isIdle() ? "immediate" : "steer",
+        );
         updateStatus(ctx, config);
         ctx.ui.notify("downshift on for this session", "info");
         return;

@@ -42,7 +42,7 @@ type StateEntry = Partial<DownshiftState> & { version?: number };
 
 export type Runtime = { state: DownshiftState };
 
-export type HandoffDelivery = "immediate" | "followUp" | "steer";
+export type HandoffDelivery = "immediate" | "steer";
 
 export type CoreDeps = {
   readConfig: () => Promise<DownshiftConfig | undefined>;
@@ -312,6 +312,7 @@ export async function maybeDownshift(
   deps: CoreDeps,
   runtime: Runtime,
   ctx: UsageContext,
+  delivery: HandoffDelivery,
 ): Promise<DownshiftState> {
   const config = await deps.readConfig();
   deps.updateStatus(config);
@@ -330,7 +331,7 @@ export async function maybeDownshift(
   if (!thresholdReached(ctx.getContextUsage(), config.threshold))
     return runtime.state;
   if (config.handoffBeforeDownshift && runtime.state.handoff === "idle") {
-    return requestHandoff(deps, runtime, "followUp", config);
+    return requestHandoff(deps, runtime, delivery, config);
   }
   const switched = await deps.switchToTarget(
     config.economy,

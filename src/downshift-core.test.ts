@@ -32,10 +32,7 @@ type TestDeps = {
   readConfig: Mock<() => Promise<DownshiftConfig | undefined>>;
   saveState: Mock<(state: DownshiftState) => void>;
   sendUserMessage: Mock<
-    (
-      prompt: string,
-      options?: { deliverAs: "followUp" | "steer" },
-    ) => Promise<void>
+    (prompt: string, options?: { deliverAs: "steer" }) => Promise<void>
   >;
   switchToTarget: Mock<
     (
@@ -76,11 +73,11 @@ const ctx = {
 describe("downshift core", () => {
   beforeEach(() => vi.clearAllMocks());
 
-  it("queues one handoff before downshifting", async () => {
+  it("queues a steering handoff when threshold is reached during agent work", async () => {
     const deps = createDeps();
     const runtime = { state: createState() };
 
-    await maybeDownshift(deps, runtime, ctx);
+    await maybeDownshift(deps, runtime, ctx, "steer");
 
     expect(runtime.state.handoff).toBe("requested");
     expect(runtime.state.position).toBe("premium");
@@ -89,8 +86,20 @@ describe("downshift core", () => {
     expect(prompt).toContain(HANDOFF_MARKER);
     expect(prompt).toContain("Do not call tools.");
     expect(deps.sendUserMessage).toHaveBeenCalledWith(expect.any(String), {
-      deliverAs: "followUp",
+      deliverAs: "steer",
     });
+    expect(deps.switchToTarget).not.toHaveBeenCalled();
+  });
+
+  it("sends an immediate handoff when threshold is reached while idle", async () => {
+    const deps = createDeps();
+    const runtime = { state: createState() };
+
+    await maybeDownshift(deps, runtime, ctx, "immediate");
+
+    expect(runtime.state.handoff).toBe("requested");
+    expect(deps.sendUserMessage).toHaveBeenCalledWith(expect.any(String));
+    expect(deps.sendUserMessage.mock.calls[0][1]).toBeUndefined();
     expect(deps.switchToTarget).not.toHaveBeenCalled();
   });
 
@@ -98,8 +107,8 @@ describe("downshift core", () => {
     const deps = createDeps();
     const runtime = { state: createState({ handoff: "requested" }) };
 
-    await maybeDownshift(deps, runtime, ctx);
-    await maybeDownshift(deps, runtime, ctx);
+    await maybeDownshift(deps, runtime, ctx, "steer");
+    await maybeDownshift(deps, runtime, ctx, "steer");
 
     expect(deps.sendUserMessage).not.toHaveBeenCalled();
     expect(deps.switchToTarget).not.toHaveBeenCalled();
@@ -167,7 +176,7 @@ describe("downshift core", () => {
     const deps = createDeps({ ...baseConfig, handoffBeforeDownshift: false });
     const runtime = { state: createState() };
 
-    await maybeDownshift(deps, runtime, ctx);
+    await maybeDownshift(deps, runtime, ctx, "steer");
 
     expect(deps.sendUserMessage).not.toHaveBeenCalled();
     expect(deps.switchToTarget).toHaveBeenCalledOnce();

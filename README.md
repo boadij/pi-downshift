@@ -22,6 +22,8 @@ The economy model continues from it.
 
 When context pressure crosses the threshold, Downshift can ask the premium model to write a concise handoff note before switching to the economy model.
 
+If the agent is already running, Downshift uses Pi steering so the handoff is delivered at the next safe interruption point instead of waiting for the entire task to finish. After the handoff note is written, Downshift switches to the configured economy model.
+
 This note becomes normal conversation context. It gives the economy model the current goal, decisions, relevant files, remaining steps, constraints, and tests.
 
 The handoff request itself is also sent as a normal user message so the resulting assistant note becomes durable conversation context.
