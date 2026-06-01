@@ -18,17 +18,26 @@ Downshift is built around a simple idea:
 The premium model creates the working context.
 The economy model continues from it.
 
+## Handoff note
+
+When context pressure crosses the threshold, Downshift can ask the premium model to write a concise handoff note before switching to the economy model.
+
+This note becomes normal conversation context. It gives the economy model the current goal, decisions, relevant files, remaining steps, constraints, and tests.
+
+This keeps Downshift simple: premium handles orientation, economy handles continuation.
+
 ## What it does
 
-* Starts sessions on a premium model, or captures the current model as premium
-* Watches Pi's context usage
-* Switches to a configured economy model after a token or percent threshold
-* Supports token thresholds, percent thresholds, or both
-* Preserves session state
-* Pauses automatically after manual model changes
-* Optionally switches back to premium after compaction
-* Shows a compact status indicator in the UI
-* Provides simple `/downshift` commands
+- Starts sessions on a premium model, or captures the current model as premium
+- Watches Pi's context usage
+- Asks the premium model for a compact handoff note before switching
+- Switches to a configured economy model after a token or percent threshold
+- Supports token thresholds, percent thresholds, or both
+- Preserves session state
+- Pauses automatically after manual model changes
+- Optionally switches back to premium after compaction
+- Shows a compact status indicator in the UI
+- Provides simple `/downshift` commands
 
 ## What it is not
 
@@ -61,12 +70,13 @@ Run:
 
 You will be prompted to choose:
 
-* Whether Downshift is enabled
-* A context threshold
-* An economy model
-* Whether premium means the current session model or an explicit model
-* Whether fresh sessions should start on premium
-* Whether to upshift after compaction
+- Whether Downshift is enabled
+- A context threshold
+- An economy model
+- Whether premium means the current session model or an explicit model
+- Whether fresh sessions should start on premium
+- Whether to upshift after compaction
+- Whether to create a handoff note before downshifting
 
 ## Commands
 
@@ -111,7 +121,8 @@ Downshift stores its config in Pi's agent directory as `downshift.json`.
   },
   "premiumSource": "current",
   "startOnPremium": true,
-  "upshiftAfterCompaction": true
+  "upshiftAfterCompaction": true,
+  "handoffBeforeDownshift": true
 }
 ```
 
@@ -127,6 +138,8 @@ A coding session often has two phases:
 
 Downshift automates that handoff with a threshold.
 
+Model selection uses Pi's public model registry. Downshift no longer reads Pi's internal settings file or imports private resolver internals. The picker may show more available models than before, but the extension is now portable and does not depend on local install paths.
+
 ## Status indicator
 
 Downshift adds a compact status label:
@@ -140,6 +153,8 @@ This means Downshift is active and will switch to the economy model when the con
 Other states:
 
 ```text
+⇣ handoff
+⇣ writing handoff
 ⇣ eco
 ⇣ paused
 ⇣ off
@@ -151,10 +166,10 @@ Downshift pauses instead of guessing when something changes unexpectedly.
 
 It pauses when:
 
-* The configured model cannot be found
-* The selected thinking level is unsupported
-* The target provider has no available API key
-* You manually change models during the session
+- The configured model cannot be found
+- The selected thinking level is unsupported
+- The target provider has no available API key
+- You manually change models during the session
 
 This keeps model switching explicit and predictable.
 
