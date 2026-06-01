@@ -1,11 +1,11 @@
-# Downshift
+# 🕹️ Downshift
 
 A tiny Pi Coding Agent extension that switches from a premium model to an economy model when your context gets expensive.
 
 Downshift is not a model router.
 It does one thing: **start strong, then downshift when context pressure crosses a threshold.**
 
-## Why
+## Why 💸
 
 Long coding-agent sessions get increasingly expensive.
 
@@ -18,15 +18,17 @@ Downshift is built around a simple idea:
 The premium model creates the working context.
 The economy model continues from it.
 
-## Handoff note
+## Handoff note 📝
 
 When context pressure crosses the threshold, Downshift can ask the premium model to write a concise handoff note before switching to the economy model.
 
 This note becomes normal conversation context. It gives the economy model the current goal, decisions, relevant files, remaining steps, constraints, and tests.
 
+The handoff request itself is also sent as a normal user message so the resulting assistant note becomes durable conversation context.
+
 This keeps Downshift simple: premium handles orientation, economy handles continuation.
 
-## What it does
+## What it does ✅
 
 - Starts sessions on a premium model, or captures the current model as premium
 - Watches Pi's context usage
@@ -39,7 +41,7 @@ This keeps Downshift simple: premium handles orientation, economy handles contin
 - Shows a compact status indicator in the UI
 - Provides simple `/downshift` commands
 
-## What it is not
+## What it is not 🚫
 
 Downshift does not classify prompts.
 It does not benchmark models.
@@ -48,7 +50,7 @@ It does not try to be clever.
 
 It is a deterministic context-cost governor.
 
-## Install
+## Install 📦
 
 ```bash
 pi install npm:<your-package-name>
@@ -60,7 +62,7 @@ Then reload Pi:
 /reload
 ```
 
-## Configure
+## Configure ⚙️
 
 Run:
 
@@ -78,7 +80,7 @@ You will be prompted to choose:
 - Whether to upshift after compaction
 - Whether to create a handoff note before downshifting
 
-## Commands
+## Commands ⌨️
 
 ```text
 /downshift status
@@ -103,7 +105,7 @@ Disables Downshift for the current session.
 
 Re-enables Downshift for the current session.
 
-## Example config
+## Example config 🧩
 
 Downshift stores its config in Pi's agent directory as `downshift.json`.
 
@@ -126,7 +128,7 @@ Downshift stores its config in Pi's agent directory as `downshift.json`.
 }
 ```
 
-## Mental model
+## Mental model 🧠
 
 A coding session often has two phases:
 
@@ -140,7 +142,7 @@ Downshift automates that handoff with a threshold.
 
 Model selection uses Pi's public model registry. Downshift no longer reads Pi's internal settings file or imports private resolver internals. The picker may show more available models than before, but the extension is now portable and does not depend on local install paths.
 
-## Status indicator
+## Status indicator 📊
 
 Downshift adds a compact status label:
 
@@ -160,7 +162,7 @@ Other states:
 ⇣ off
 ```
 
-## Safety behavior
+## Safety behavior 🛟
 
 Downshift pauses instead of guessing when something changes unexpectedly.
 
@@ -173,7 +175,7 @@ It pauses when:
 
 This keeps model switching explicit and predictable.
 
-## Why not use a router?
+## Why not use a router? 🧭
 
 Routers are useful when you want per-prompt model selection.
 
@@ -183,6 +185,6 @@ Downshift is for a narrower case:
 
 That narrower scope makes Downshift easier to reason about, easier to configure, and less surprising during long coding sessions.
 
-## License
+## License 📄
 
 MIT

@@ -245,23 +245,23 @@ function restoreState(ctx: ExtensionContext): boolean {
     )
       continue;
     const data = entry.data as StateEntry;
+    const interrupted =
+      data.handoff === "requested" || data.handoff === "active";
     state = {
       sessionId:
         typeof data.sessionId === "string"
           ? data.sessionId
           : ctx.sessionManager.getSessionId(),
       sessionEnabled: data.sessionEnabled !== false,
-      paused: data.paused === true,
+      paused: interrupted || data.paused === true,
       position: data.position === "economy" ? "economy" : "premium",
-      handoff:
-        data.handoff === "requested" ||
-        data.handoff === "active" ||
-        data.handoff === "done"
-          ? data.handoff
-          : "idle",
+      handoff: data.handoff === "done" ? "done" : "idle",
       capturedPremium: parseTarget(data.capturedPremium),
-      lastError:
-        typeof data.lastError === "string" ? data.lastError : undefined,
+      lastError: interrupted
+        ? "handoff interrupted by reload"
+        : typeof data.lastError === "string"
+          ? data.lastError
+          : undefined,
     };
     return true;
   }
@@ -322,15 +322,12 @@ function resolvePremiumTarget(
     : state.capturedPremium;
 }
 
-function buildHandoffPrompt(
-  _config: DownshiftConfig,
-  _usage: ContextUsage | undefined,
-): string {
+function buildHandoffPrompt(): string {
   return `${HANDOFF_MARKER}
 
 You are preparing a handoff note before Downshift switches this session from the premium model to the economy model.
 
-Write a compact, practical handoff note for the next model. Do not continue implementation. Do not ask questions. Do not call tools unless absolutely necessary. Use only the current conversation context.
+Write a compact, practical handoff note for the next model. Do not continue implementation. Do not ask questions. Do not call tools. Use only the current conversation context.
 
 Include:
 
@@ -353,10 +350,7 @@ async function requestHandoff(
   updateStatus(ctx, config);
   ctx.ui.notify("downshift: preparing handoff before economy switch", "info");
   try {
-    await pi.sendUserMessage(
-      buildHandoffPrompt(config, ctx.getContextUsage()),
-      { deliverAs: "followUp" },
-    );
+    await pi.sendUserMessage(buildHandoffPrompt(), { deliverAs: "followUp" });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     pause(pi, ctx, message, { handoff: "idle" });
@@ -704,14 +698,21 @@ export default function downshift(pi: ExtensionAPI): void {
         return;
       }
       if (command === "on") {
+        const config = await readConfig();
+        const current = getCurrentTarget(ctx);
         saveState(pi, {
           sessionEnabled: true,
           paused: false,
+          position: "premium",
           lastError: undefined,
           handoff: "idle",
+          capturedPremium:
+            config?.premiumSource === "current" && current
+              ? { ...current, thinkingLevel: pi.getThinkingLevel() }
+              : state.capturedPremium,
         });
         await maybeDownshift(pi, ctx);
-        updateStatus(ctx, await readConfig());
+        updateStatus(ctx, config);
         ctx.ui.notify("downshift on for this session", "info");
         return;
       }
