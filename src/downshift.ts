@@ -9,54 +9,32 @@ import type {
   ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
-
-type ModelTarget = {
-  provider: string;
-  model: string;
-  thinkingLevel: ThinkingLevel;
-};
-
-type Threshold = {
-  tokens?: number;
-  percent?: number;
-};
-
-type DownshiftConfig = {
-  enabled: boolean;
-  threshold: Threshold;
-  economy: ModelTarget;
-  premiumSource: "current" | "explicit";
-  premium?: ModelTarget;
-  startOnPremium: boolean;
-  upshiftAfterCompaction: boolean;
-  handoffBeforeDownshift: boolean;
-};
-
-type Position = "premium" | "economy";
-type HandoffState = "idle" | "requested" | "active" | "done";
-
-type DownshiftState = {
-  sessionId?: string;
-  sessionEnabled: boolean;
-  paused: boolean;
-  position: Position;
-  handoff: HandoffState;
-  capturedPremium?: ModelTarget;
-  lastError?: string;
-};
-
-type StateEntry = Partial<DownshiftState> & { version?: number };
+import {
+  HANDOFF_MARKER,
+  createInitialState,
+  handleAgentEnd,
+  handleBeforeAgentStart,
+  handleManualModelSelect,
+  maybeDownshift,
+  maybeUpshift,
+  restoreStateFromEntries,
+  statusText,
+  thresholdReached,
+  type DownshiftConfig,
+  type DownshiftState,
+  type ModelTarget,
+  type Position,
+  type Threshold,
+} from "./downshift-core";
 
 const CONFIG_PATH = join(getAgentDir(), "downshift.json");
 const CUSTOM_TYPE = "downshift-state";
-const HANDOFF_MARKER = "<!-- downshift:handoff:v1 -->";
 
-let state: DownshiftState = {
-  sessionEnabled: true,
-  paused: false,
-  position: "premium",
-  handoff: "idle",
-};
+type StateEntry = Partial<DownshiftState> & { version?: number };
+
+type Runtime = { state: DownshiftState };
+
+let runtime: Runtime = { state: createInitialState() };
 let internalModelChange = false;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -78,7 +56,7 @@ function parseTarget(value: unknown): ModelTarget | undefined {
   return {
     provider: value.provider,
     model: value.model,
-    thinkingLevel: value.thinkingLevel as ThinkingLevel,
+    thinkingLevel: value.thinkingLevel,
   };
 }
 
@@ -130,7 +108,7 @@ function getCurrentTarget(
   return {
     provider: ctx.model.provider,
     model: ctx.model.id,
-    thinkingLevel: "off" as ThinkingLevel,
+    thinkingLevel: "off",
   };
 }
 
@@ -148,124 +126,26 @@ function formatThreshold(threshold: Threshold): string {
   return parts.join(" or ");
 }
 
-function thresholdReached(
-  usage: ContextUsage | undefined,
-  threshold: Threshold,
-): boolean {
-  if (!usage) return false;
-  if (
-    threshold.tokens &&
-    usage.tokens !== null &&
-    usage.tokens >= threshold.tokens
-  )
-    return true;
-  if (
-    threshold.percent &&
-    usage.percent !== null &&
-    usage.percent >= threshold.percent
-  )
-    return true;
-  return false;
-}
-
-function belowThreshold(
-  usage: ContextUsage | undefined,
-  threshold: Threshold,
-): boolean {
-  if (!usage) return false;
-  if (
-    threshold.tokens &&
-    (usage.tokens === null || usage.tokens >= threshold.tokens)
-  )
-    return false;
-  if (
-    threshold.percent &&
-    (usage.percent === null || usage.percent >= threshold.percent)
-  )
-    return false;
-  return true;
-}
-
-function formatCompactNumber(value: number): string {
-  const absolute = Math.abs(value);
-  if (absolute >= 1_000_000) return `${Math.round(value / 1_000_000)}m`;
-  if (absolute >= 1_000) return `${Math.round(value / 1_000)}k`;
-  return `${Math.round(value)}`;
-}
-
-function statusText(
-  config: DownshiftConfig | undefined,
-  usage: ContextUsage | undefined,
-): string {
-  if (!config?.enabled || !state.sessionEnabled) return "⇣ off";
-  if (state.paused) return "⇣ paused";
-  if (state.handoff === "requested") return "⇣ handoff";
-  if (state.handoff === "active") return "⇣ writing handoff";
-  if (state.position === "economy") return "⇣ eco";
-
-  const parts: string[] = [];
-  if (
-    config.threshold.tokens !== undefined &&
-    usage?.tokens !== null &&
-    usage?.tokens !== undefined
-  ) {
-    const tokensLeft = Math.max(0, config.threshold.tokens - usage.tokens);
-    parts.push(formatCompactNumber(tokensLeft));
-  }
-  if (
-    config.threshold.percent !== undefined &&
-    usage?.percent !== null &&
-    usage?.percent !== undefined
-  ) {
-    const percentLeft = Math.max(0, config.threshold.percent - usage.percent);
-    parts.push(`${Math.round(percentLeft)}%`);
-  }
-
-  if (parts.length === 0) return "⇣ ? → eco";
-  return `⇣ ${parts.join(" / ")} → eco`;
-}
-
 function updateStatus(ctx: ExtensionContext, config?: DownshiftConfig): void {
-  ctx.ui.setStatus("downshift", statusText(config, ctx.getContextUsage()));
+  ctx.ui.setStatus(
+    "downshift",
+    statusText(config, runtime.state, ctx.getContextUsage()),
+  );
 }
 
 function saveState(pi: ExtensionAPI, patch?: Partial<DownshiftState>): void {
-  if (patch) state = { ...state, ...patch };
-  pi.appendEntry<StateEntry>(CUSTOM_TYPE, { version: 1, ...state });
+  if (patch) runtime.state = { ...runtime.state, ...patch };
+  pi.appendEntry<StateEntry>(CUSTOM_TYPE, { version: 1, ...runtime.state });
 }
 
 function restoreState(ctx: ExtensionContext): boolean {
-  const entries = ctx.sessionManager.getEntries();
-  for (let index = entries.length - 1; index >= 0; index -= 1) {
-    const entry = entries[index];
-    if (
-      entry.type !== "custom" ||
-      entry.customType !== CUSTOM_TYPE ||
-      !isRecord(entry.data)
-    )
-      continue;
-    const data = entry.data as StateEntry;
-    const interrupted =
-      data.handoff === "requested" || data.handoff === "active";
-    state = {
-      sessionId:
-        typeof data.sessionId === "string"
-          ? data.sessionId
-          : ctx.sessionManager.getSessionId(),
-      sessionEnabled: data.sessionEnabled !== false,
-      paused: interrupted || data.paused === true,
-      position: data.position === "economy" ? "economy" : "premium",
-      handoff: data.handoff === "done" ? "done" : "idle",
-      capturedPremium: parseTarget(data.capturedPremium),
-      lastError: interrupted
-        ? "handoff interrupted by reload"
-        : typeof data.lastError === "string"
-          ? data.lastError
-          : undefined,
-    };
-    return true;
-  }
-  return false;
+  const restored = restoreStateFromEntries(
+    ctx.sessionManager.getEntries(),
+    ctx.sessionManager.getSessionId(),
+  );
+  if (!restored) return false;
+  runtime.state = restored;
+  return true;
 }
 
 function pause(
@@ -290,7 +170,7 @@ async function switchToTarget(
   const model = ctx.modelRegistry.find(target.provider, target.model);
   if (!model) return pause(pi, ctx, `model not found: ${targetLabel(target)}`);
   const levels = getSupportedThinkingLevels(model);
-  if (!levels.includes(target.thinkingLevel)) {
+  if (!levels.includes(target.thinkingLevel as ThinkingLevel)) {
     return pause(pi, ctx, `thinking level unsupported: ${targetLabel(target)}`);
   }
   try {
@@ -302,7 +182,7 @@ async function switchToTarget(
         ctx,
         `no API key for ${target.provider}/${target.model}`,
       );
-    pi.setThinkingLevel(target.thinkingLevel);
+    pi.setThinkingLevel(target.thinkingLevel as ThinkingLevel);
     saveState(pi, { position, lastError: undefined });
     ctx.ui.notify(`downshift: ${reason} to ${targetLabel(target)}`, "info");
     return true;
@@ -314,129 +194,29 @@ async function switchToTarget(
   }
 }
 
+function coreDeps(pi: ExtensionAPI, ctx: ExtensionContext) {
+  return {
+    readConfig,
+    saveState: (next: DownshiftState) => {
+      runtime.state = next;
+      saveState(pi);
+    },
+    sendUserMessage: (prompt: string, options: { deliverAs: "followUp" }) =>
+      pi.sendUserMessage(prompt, options),
+    switchToTarget: (target: ModelTarget, position: Position, reason: string) =>
+      switchToTarget(pi, ctx, target, position, reason),
+    updateStatus: () => updateStatus(ctx),
+    notify: (message: string, level?: string) =>
+      ctx.ui.notify(message, level as any),
+  };
+}
+
 function resolvePremiumTarget(
   config: DownshiftConfig,
 ): ModelTarget | undefined {
   return config.premiumSource === "explicit"
     ? config.premium
-    : state.capturedPremium;
-}
-
-function buildHandoffPrompt(): string {
-  return `${HANDOFF_MARKER}
-
-You are preparing a handoff note before Downshift switches this session from the premium model to the economy model.
-
-Write a compact, practical handoff note for the next model. Do not continue implementation. Do not ask questions. Do not call tools. Use only the current conversation context.
-
-Include:
-
-1. Goal
-2. Current state
-3. Relevant files, symbols, commands, and decisions
-4. Remaining steps
-5. Constraints and pitfalls
-6. Tests or checks to run
-
-Keep it concise, concrete, and execution-oriented.`;
-}
-
-async function requestHandoff(
-  pi: ExtensionAPI,
-  ctx: ExtensionContext,
-  config: DownshiftConfig,
-): Promise<void> {
-  saveState(pi, { handoff: "requested", lastError: undefined });
-  updateStatus(ctx, config);
-  ctx.ui.notify("downshift: preparing handoff before economy switch", "info");
-  try {
-    await pi.sendUserMessage(buildHandoffPrompt(), { deliverAs: "followUp" });
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    pause(pi, ctx, message, { handoff: "idle" });
-  }
-}
-
-async function completeHandoffAndSwitch(
-  pi: ExtensionAPI,
-  ctx: ExtensionContext,
-): Promise<void> {
-  const config = await readConfig();
-  if (
-    !config?.enabled ||
-    !state.sessionEnabled ||
-    state.paused ||
-    state.position === "economy"
-  ) {
-    if (!state.paused && state.position !== "economy")
-      saveState(pi, { handoff: "idle" });
-    updateStatus(ctx, config);
-    return;
-  }
-  saveState(pi, { handoff: "done" });
-  await switchToTarget(pi, ctx, config.economy, "economy", "handoff complete");
-  updateStatus(ctx, config);
-}
-
-async function maybeDownshift(
-  pi: ExtensionAPI,
-  ctx: ExtensionContext,
-): Promise<void> {
-  const config = await readConfig();
-  updateStatus(ctx, config);
-  if (
-    !config?.enabled ||
-    !state.sessionEnabled ||
-    state.paused ||
-    state.position === "economy"
-  )
-    return;
-  if (state.handoff === "requested" || state.handoff === "active") return;
-  if (!thresholdReached(ctx.getContextUsage(), config.threshold)) return;
-  if (config.handoffBeforeDownshift && state.handoff === "idle") {
-    await requestHandoff(pi, ctx, config);
-    return;
-  }
-  const switched = await switchToTarget(
-    pi,
-    ctx,
-    config.economy,
-    "economy",
-    "switched",
-  );
-  if (switched) saveState(pi, { handoff: "done", lastError: undefined });
-  updateStatus(ctx, config);
-}
-
-async function maybeUpshift(
-  pi: ExtensionAPI,
-  ctx: ExtensionContext,
-): Promise<void> {
-  const config = await readConfig();
-  updateStatus(ctx, config);
-  if (
-    !config?.enabled ||
-    !config.upshiftAfterCompaction ||
-    !state.sessionEnabled ||
-    state.paused
-  )
-    return;
-  if (state.position !== "economy") return;
-  if (!belowThreshold(ctx.getContextUsage(), config.threshold)) return;
-  const premium = resolvePremiumTarget(config);
-  if (!premium) {
-    pause(pi, ctx, "premium target is unset");
-    return;
-  }
-  const switched = await switchToTarget(
-    pi,
-    ctx,
-    premium,
-    "premium",
-    "upshifted",
-  );
-  if (switched) saveState(pi, { handoff: "idle", lastError: undefined });
-  updateStatus(ctx, config);
+    : runtime.state.capturedPremium;
 }
 
 async function selectTarget(
@@ -544,7 +324,6 @@ async function configure(ctx: ExtensionCommandContext): Promise<void> {
     ["yes", "no"],
   );
   if (!handoffChoice) return;
-  const handoffBeforeDownshift = handoffChoice === "yes";
   await writeConfig({
     enabled,
     threshold,
@@ -553,7 +332,7 @@ async function configure(ctx: ExtensionCommandContext): Promise<void> {
     premium,
     startOnPremium,
     upshiftAfterCompaction,
-    handoffBeforeDownshift,
+    handoffBeforeDownshift: handoffChoice === "yes",
   });
   ctx.ui.notify("downshift config saved", "info");
 }
@@ -565,6 +344,13 @@ function formatUsage(usage: ContextUsage | undefined): string {
   const percent =
     usage.percent === null ? "unknown" : `${Math.round(usage.percent)}%`;
   return `${tokens} tokens (${percent})`;
+}
+
+function formatCompactNumber(value: number): string {
+  const absolute = Math.abs(value);
+  if (absolute >= 1_000_000) return `${Math.round(value / 1_000_000)}m`;
+  if (absolute >= 1_000) return `${Math.round(value / 1_000)}k`;
+  return `${Math.round(value)}`;
 }
 
 function formatRemaining(
@@ -598,19 +384,20 @@ async function showStatus(ctx: ExtensionCommandContext): Promise<void> {
   const config = await readConfig();
   const usage = ctx.getContextUsage();
   const lines = [
-    `mode: ${statusText(config, usage)}`,
+    `mode: ${statusText(config, runtime.state, usage)}`,
     `usage: ${formatUsage(usage)}`,
     `remaining: ${config ? formatRemaining(usage, config.threshold) : "unset"}`,
     `threshold: ${config ? formatThreshold(config.threshold) : "unset"}`,
     `premium: ${config ? targetLabel(resolvePremiumTarget(config)) : "unset"}`,
     `economy: ${config ? targetLabel(config.economy) : "unset"}`,
     `handoff: ${config?.handoffBeforeDownshift ? "auto" : "off"}`,
-    `handoff state: ${state.handoff}`,
+    `handoff state: ${runtime.state.handoff}`,
     `upshift: ${config?.upshiftAfterCompaction ? "on" : "off"}`,
     `source: ${config?.premiumSource ?? "current"}`,
     `commands: /downshift status | on | off | config`,
   ];
-  if (state.lastError) lines.push(`last error: ${state.lastError}`);
+  if (runtime.state.lastError)
+    lines.push(`last error: ${runtime.state.lastError}`);
   ctx.ui.notify(lines.join("\n"), "info");
 }
 
@@ -620,7 +407,7 @@ export default function downshift(pi: ExtensionAPI): void {
     const config = await readConfig();
     if (!hadState) {
       const current = getCurrentTarget(ctx);
-      state = {
+      runtime.state = {
         sessionId: ctx.sessionManager.getSessionId(),
         sessionEnabled: true,
         paused: false,
@@ -645,44 +432,24 @@ export default function downshift(pi: ExtensionAPI): void {
   });
 
   pi.on("context", async (_event, ctx) => {
-    await maybeDownshift(pi, ctx);
+    await maybeDownshift(coreDeps(pi, ctx), runtime, ctx);
   });
 
   pi.on("before_agent_start", async (event, ctx) => {
-    if (
-      !("prompt" in event) ||
-      typeof event.prompt !== "string" ||
-      !event.prompt.includes(HANDOFF_MARKER)
-    )
-      return;
-    if (state.handoff !== "requested") return;
-    saveState(pi, { handoff: "active" });
-    updateStatus(ctx, await readConfig());
+    await handleBeforeAgentStart(coreDeps(pi, ctx), runtime, event, ctx);
   });
 
   pi.on("agent_end", async (_event, ctx) => {
-    if (state.handoff !== "active") return;
-    await completeHandoffAndSwitch(pi, ctx);
+    await handleAgentEnd(coreDeps(pi, ctx), runtime, ctx);
   });
 
   pi.on("session_compact", async (_event, ctx) => {
-    await maybeUpshift(pi, ctx);
+    await maybeUpshift(coreDeps(pi, ctx), runtime, ctx);
   });
 
   pi.on("model_select", async (event, ctx) => {
-    if (internalModelChange || event.source === "restore") return;
-    const config = await readConfig();
-    if (!config?.enabled || !state.sessionEnabled) {
-      updateStatus(ctx, config);
-      return;
-    }
-    saveState(pi, {
-      paused: true,
-      position: "premium",
-      handoff: "idle",
-      lastError: "manual model change",
-    });
-    updateStatus(ctx, config);
+    if (internalModelChange) return;
+    await handleManualModelSelect(coreDeps(pi, ctx), runtime, event, ctx);
   });
 
   pi.registerCommand("downshift", {
@@ -709,9 +476,9 @@ export default function downshift(pi: ExtensionAPI): void {
           capturedPremium:
             config?.premiumSource === "current" && current
               ? { ...current, thinkingLevel: pi.getThinkingLevel() }
-              : state.capturedPremium,
+              : runtime.state.capturedPremium,
         });
-        await maybeDownshift(pi, ctx);
+        await maybeDownshift(coreDeps(pi, ctx), runtime, ctx);
         updateStatus(ctx, config);
         ctx.ui.notify("downshift on for this session", "info");
         return;
