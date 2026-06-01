@@ -22,7 +22,7 @@ The economy model continues from it.
 
 When context pressure crosses the threshold, Downshift can ask the premium model to write a concise handoff note before switching to the economy model.
 
-If the agent is already running, Downshift uses Pi steering so the handoff is delivered at the next safe interruption point instead of waiting for the entire task to finish. After the handoff note is written, Downshift switches to the configured economy model.
+If the agent is already running, Downshift uses Pi steering so the handoff is delivered at the next safe interruption point instead of waiting for the entire task to finish. After the handoff note is written, Downshift switches to the configured economy model and queues a continuation message so the economy model can resume the original work.
 
 This note becomes normal conversation context. It gives the economy model the current goal, decisions, relevant files, remaining steps, constraints, and tests.
 
@@ -104,7 +104,7 @@ Opens the interactive setup flow.
 
 Starts the handoff immediately, regardless of the configured threshold.
 
-If the agent is idle, Downshift asks the currently running model to write the handoff note now. If the agent is already running, Downshift uses Pi's steering delivery so the handoff request is injected before the next model call using the currently running model. After the handoff note is written, Downshift switches to the configured economy model.
+If the agent is idle, Downshift asks the current model to write the handoff note now, then switches to the configured economy model. If the agent is already running, Downshift uses Pi steering to inject the handoff before the next model call. After the handoff note is written, Downshift switches to economy and queues a continuation message so work can resume on the cheaper model.
 
 ### `/downshift off`
 

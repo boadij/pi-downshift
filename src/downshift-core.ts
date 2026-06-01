@@ -29,6 +29,7 @@ export type DownshiftState = {
   paused: boolean;
   position: Position;
   handoff: HandoffState;
+  continueAfterHandoff: boolean;
   capturedPremium?: ModelTarget;
   lastError?: string;
 };
@@ -43,13 +44,14 @@ type StateEntry = Partial<DownshiftState> & { version?: number };
 export type Runtime = { state: DownshiftState };
 
 export type HandoffDelivery = "immediate" | "steer";
+export type UserMessageDelivery = "steer" | "followUp";
 
 export type CoreDeps = {
   readConfig: () => Promise<DownshiftConfig | undefined>;
   saveState: (state: DownshiftState) => void;
   sendUserMessage: (
     prompt: string,
-    options?: { deliverAs: Exclude<HandoffDelivery, "immediate"> },
+    options?: { deliverAs: UserMessageDelivery },
   ) => void | Promise<void>;
   switchToTarget: (
     target: ModelTarget,
@@ -63,6 +65,7 @@ export type CoreDeps = {
 type UsageContext = { getContextUsage: () => ContextUsageLike | undefined };
 
 export const HANDOFF_MARKER = "<!-- downshift:handoff:v1 -->";
+export const CONTINUE_MARKER = "<!-- downshift:continue:v1 -->";
 
 export function createInitialState(): DownshiftState {
   return {
@@ -70,6 +73,7 @@ export function createInitialState(): DownshiftState {
     paused: false,
     position: "premium",
     handoff: "idle",
+    continueAfterHandoff: false,
   };
 }
 
@@ -112,6 +116,7 @@ export function restoreStateFromEntries(
       paused: interrupted || data.paused === true,
       position: data.position === "economy" ? "economy" : "premium",
       handoff: data.handoff === "done" ? "done" : "idle",
+      continueAfterHandoff: false,
       capturedPremium: parseTarget(data.capturedPremium),
       lastError: interrupted
         ? "handoff interrupted by reload"
@@ -215,13 +220,27 @@ function buildHandoffPrompt(): string {
   return `${HANDOFF_MARKER}\n\nYou are preparing a handoff note before Downshift switches this session from the premium model to the economy model.\n\nWrite a compact, practical handoff note for the next model. Do not continue implementation. Do not ask questions. Do not call tools. Use only the current conversation context.\n\nInclude:\n\n1. Goal\n2. Current state\n3. Relevant files, symbols, commands, and decisions\n4. Remaining steps\n5. Constraints and pitfalls\n6. Tests or checks to run\n\nKeep it concise, concrete, and execution-oriented.`;
 }
 
+function buildContinuePrompt(): string {
+  return `${CONTINUE_MARKER}
+
+Continue the original task from the Downshift handoff note using the current model.
+
+Do not repeat the handoff note.
+Do not restate the plan unless needed.
+Pick up with the next concrete step and continue execution.`;
+}
+
 export async function requestHandoff(
   deps: CoreDeps,
   runtime: Runtime,
   delivery: HandoffDelivery,
   config?: DownshiftConfig,
 ): Promise<DownshiftState> {
-  setState(deps, runtime, { handoff: "requested", lastError: undefined });
+  setState(deps, runtime, {
+    handoff: "requested",
+    continueAfterHandoff: delivery === "steer",
+    lastError: undefined,
+  });
   deps.updateStatus(config);
   deps.notify("downshift: preparing handoff before economy switch", "info");
   try {
@@ -235,6 +254,7 @@ export async function requestHandoff(
     const message = error instanceof Error ? error.message : String(error);
     setState(deps, runtime, {
       handoff: "idle",
+      continueAfterHandoff: false,
       paused: true,
       lastError: message,
     });
@@ -291,19 +311,42 @@ export async function completeHandoffAndSwitch(
     runtime.state.position === "economy"
   ) {
     if (!runtime.state.paused && runtime.state.position !== "economy") {
-      setState(deps, runtime, { handoff: "idle" });
+      setState(deps, runtime, {
+        handoff: "idle",
+        continueAfterHandoff: false,
+      });
     }
     deps.updateStatus(config);
     return runtime.state;
   }
-  setState(deps, runtime, { handoff: "done" });
+  const shouldContinue = runtime.state.continueAfterHandoff;
+  setState(deps, runtime, {
+    handoff: "done",
+    continueAfterHandoff: false,
+  });
   const switched = await deps.switchToTarget(
     config.economy,
     "economy",
     "handoff complete",
   );
-  if (switched)
+  if (switched) {
     setState(deps, runtime, { position: "economy", lastError: undefined });
+    if (shouldContinue) {
+      try {
+        await deps.sendUserMessage(buildContinuePrompt(), {
+          deliverAs: "followUp",
+        });
+        deps.notify("downshift: continuing on economy", "info");
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        setState(deps, runtime, {
+          paused: true,
+          lastError: `continue failed: ${message}`,
+        });
+        deps.notify(`downshift paused: continue failed: ${message}`, "error");
+      }
+    }
+  }
   deps.updateStatus(config);
   return runtime.state;
 }
@@ -342,6 +385,7 @@ export async function maybeDownshift(
     setState(deps, runtime, {
       position: "economy",
       handoff: "done",
+      continueAfterHandoff: false,
       lastError: undefined,
     });
   deps.updateStatus(config);
@@ -371,6 +415,7 @@ export async function maybeUpshift(
   if (!premium) {
     setState(deps, runtime, {
       paused: true,
+      continueAfterHandoff: false,
       lastError: "premium target is unset",
     });
     deps.notify("downshift paused: premium target is unset", "error");
@@ -381,6 +426,7 @@ export async function maybeUpshift(
     setState(deps, runtime, {
       position: "premium",
       handoff: "idle",
+      continueAfterHandoff: false,
       lastError: undefined,
     });
   deps.updateStatus(config);
@@ -399,17 +445,30 @@ export async function handleBeforeAgentStart(
     runtime.state.handoff === "requested"
   ) {
     setState(deps, runtime, { handoff: "active" });
-    deps.updateStatus();
+    deps.updateStatus(await deps.readConfig());
   }
   return runtime.state;
+}
+
+function containsText(value: unknown, text: string): boolean {
+  if (typeof value === "string") return value.includes(text);
+  if (!value || typeof value !== "object") return false;
+  if (Array.isArray(value))
+    return value.some((item) => containsText(item, text));
+  return Object.values(value).some((item) => containsText(item, text));
 }
 
 export async function handleAgentEnd(
   deps: CoreDeps,
   runtime: Runtime,
+  event: { messages?: unknown[] },
   _ctx: UsageContext,
 ): Promise<DownshiftState> {
-  if (runtime.state.handoff === "active") {
+  const completedHandoff =
+    runtime.state.handoff === "active" ||
+    (runtime.state.handoff === "requested" &&
+      containsText(event.messages, HANDOFF_MARKER));
+  if (completedHandoff) {
     return completeHandoffAndSwitch(deps, runtime);
   }
   return runtime.state;
@@ -431,6 +490,7 @@ export async function handleManualModelSelect(
     paused: true,
     position: "premium",
     handoff: "idle",
+    continueAfterHandoff: false,
     lastError: "manual model change",
   });
   deps.updateStatus(config);

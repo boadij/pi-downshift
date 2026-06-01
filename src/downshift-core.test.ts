@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi, type Mock } from "vitest";
 import {
+  CONTINUE_MARKER,
   HANDOFF_MARKER,
   forceDownshiftNow,
   handleAgentEnd,
@@ -32,7 +33,10 @@ type TestDeps = {
   readConfig: Mock<() => Promise<DownshiftConfig | undefined>>;
   saveState: Mock<(state: DownshiftState) => void>;
   sendUserMessage: Mock<
-    (prompt: string, options?: { deliverAs: "steer" }) => Promise<void>
+    (
+      prompt: string,
+      options?: { deliverAs: "steer" | "followUp" },
+    ) => Promise<void>
   >;
   switchToTarget: Mock<
     (
@@ -62,6 +66,7 @@ function createState(patch: Partial<DownshiftState> = {}): DownshiftState {
     paused: false,
     position: "premium",
     handoff: "idle",
+    continueAfterHandoff: false,
     ...patch,
   };
 }
@@ -81,6 +86,7 @@ describe("downshift core", () => {
 
     expect(runtime.state.handoff).toBe("requested");
     expect(runtime.state.position).toBe("premium");
+    expect(runtime.state.continueAfterHandoff).toBe(true);
     expect(deps.sendUserMessage).toHaveBeenCalledOnce();
     const prompt = deps.sendUserMessage.mock.calls[0][0];
     expect(prompt).toContain(HANDOFF_MARKER);
@@ -98,6 +104,7 @@ describe("downshift core", () => {
     await maybeDownshift(deps, runtime, ctx, "immediate");
 
     expect(runtime.state.handoff).toBe("requested");
+    expect(runtime.state.continueAfterHandoff).toBe(false);
     expect(deps.sendUserMessage).toHaveBeenCalledWith(expect.any(String));
     expect(deps.sendUserMessage.mock.calls[0][1]).toBeUndefined();
     expect(deps.switchToTarget).not.toHaveBeenCalled();
@@ -123,6 +130,7 @@ describe("downshift core", () => {
 
     expect(runtime.state.handoff).toBe("requested");
     expect(runtime.state.position).toBe("premium");
+    expect(runtime.state.continueAfterHandoff).toBe(true);
     expect(deps.sendUserMessage).toHaveBeenCalledWith(expect.any(String), {
       deliverAs: "steer",
     });
@@ -135,6 +143,9 @@ describe("downshift core", () => {
 
     await forceDownshiftNow(deps, runtime, "immediate");
 
+    expect(runtime.state.handoff).toBe("requested");
+    expect(runtime.state.position).toBe("premium");
+    expect(runtime.state.continueAfterHandoff).toBe(false);
     expect(deps.sendUserMessage).toHaveBeenCalledWith(expect.any(String));
     expect(deps.sendUserMessage.mock.calls[0][1]).toBeUndefined();
   });
@@ -161,7 +172,7 @@ describe("downshift core", () => {
     );
     expect(runtime.state.handoff).toBe("active");
 
-    await handleAgentEnd(deps, runtime, ctx);
+    await handleAgentEnd(deps, runtime, { messages: [] }, ctx);
 
     expect(runtime.state.handoff).toBe("done");
     expect(deps.switchToTarget).toHaveBeenCalledOnce();
@@ -170,6 +181,89 @@ describe("downshift core", () => {
       "economy",
       "handoff complete",
     );
+  });
+
+  it("completes a requested handoff when agent end contains the marker", async () => {
+    const deps = createDeps();
+    const runtime = {
+      state: createState({
+        handoff: "requested",
+        continueAfterHandoff: true,
+      }),
+    };
+
+    await handleAgentEnd(
+      deps,
+      runtime,
+      { messages: [{ role: "user", content: `${HANDOFF_MARKER}\n...` }] },
+      ctx,
+    );
+
+    expect(runtime.state.handoff).toBe("done");
+    expect(runtime.state.position).toBe("economy");
+    expect(deps.sendUserMessage).toHaveBeenCalledWith(
+      expect.stringContaining(CONTINUE_MARKER),
+      { deliverAs: "followUp" },
+    );
+  });
+
+  it("continues with economy after a steered handoff completes", async () => {
+    const deps = createDeps();
+    const runtime = {
+      state: createState({
+        handoff: "active",
+        continueAfterHandoff: true,
+      }),
+    };
+
+    await handleAgentEnd(deps, runtime, { messages: [] }, ctx);
+
+    expect(deps.switchToTarget).toHaveBeenCalledWith(
+      baseConfig.economy,
+      "economy",
+      "handoff complete",
+    );
+    expect(runtime.state.position).toBe("economy");
+    expect(runtime.state.handoff).toBe("done");
+    expect(runtime.state.continueAfterHandoff).toBe(false);
+    expect(deps.sendUserMessage).toHaveBeenCalledWith(
+      expect.stringContaining(CONTINUE_MARKER),
+      { deliverAs: "followUp" },
+    );
+  });
+
+  it("does not continue after an idle handoff completes", async () => {
+    const deps = createDeps();
+    const runtime = {
+      state: createState({
+        handoff: "active",
+        continueAfterHandoff: false,
+      }),
+    };
+
+    await handleAgentEnd(deps, runtime, { messages: [] }, ctx);
+
+    expect(deps.switchToTarget).toHaveBeenCalledOnce();
+    expect(runtime.state.position).toBe("economy");
+    expect(runtime.state.handoff).toBe("done");
+    expect(deps.sendUserMessage).not.toHaveBeenCalled();
+  });
+
+  it("does not continue when economy switch fails", async () => {
+    const deps = createDeps();
+    deps.switchToTarget.mockResolvedValue(false);
+    const runtime = {
+      state: createState({
+        handoff: "active",
+        continueAfterHandoff: true,
+      }),
+    };
+
+    await handleAgentEnd(deps, runtime, { messages: [] }, ctx);
+
+    expect(deps.switchToTarget).toHaveBeenCalledOnce();
+    expect(deps.sendUserMessage).not.toHaveBeenCalled();
+    expect(runtime.state.continueAfterHandoff).toBe(false);
   });
 
   it("switches directly when handoff is disabled", async () => {
@@ -214,6 +308,7 @@ describe("downshift core", () => {
 
       expect(restored?.handoff).toBe("idle");
       expect(restored?.paused).toBe(true);
+      expect(restored?.continueAfterHandoff).toBe(false);
       expect(restored?.lastError).toBe("handoff interrupted by reload");
     }
   });

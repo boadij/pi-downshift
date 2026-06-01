@@ -202,8 +202,10 @@ function coreDeps(pi: ExtensionAPI, ctx: ExtensionContext) {
       runtime.state = next;
       saveState(pi);
     },
-    sendUserMessage: (prompt: string, options?: { deliverAs: "steer" }) =>
-      pi.sendUserMessage(prompt, options),
+    sendUserMessage: (
+      prompt: string,
+      options?: { deliverAs: "steer" | "followUp" },
+    ) => pi.sendUserMessage(prompt, options),
     switchToTarget: (target: ModelTarget, position: Position, reason: string) =>
       switchToTarget(pi, ctx, target, position, reason),
     updateStatus: (config?: DownshiftConfig) => updateStatus(ctx, config),
@@ -414,6 +416,7 @@ export default function downshift(pi: ExtensionAPI): void {
         paused: false,
         position: "premium",
         handoff: "idle",
+        continueAfterHandoff: false,
         capturedPremium: current
           ? { ...current, thinkingLevel: pi.getThinkingLevel() }
           : undefined,
@@ -446,7 +449,7 @@ export default function downshift(pi: ExtensionAPI): void {
   });
 
   pi.on("agent_end", async (_event, ctx) => {
-    await handleAgentEnd(coreDeps(pi, ctx), runtime, ctx);
+    await handleAgentEnd(coreDeps(pi, ctx), runtime, _event, ctx);
   });
 
   pi.on("session_compact", async (_event, ctx) => {
@@ -474,7 +477,11 @@ export default function downshift(pi: ExtensionAPI): void {
         return;
       }
       if (command === "off") {
-        saveState(pi, { sessionEnabled: false, handoff: "idle" });
+        saveState(pi, {
+          sessionEnabled: false,
+          handoff: "idle",
+          continueAfterHandoff: false,
+        });
         updateStatus(ctx, await readConfig());
         ctx.ui.notify("downshift off for this session", "info");
         return;
@@ -488,6 +495,7 @@ export default function downshift(pi: ExtensionAPI): void {
           position: "premium",
           lastError: undefined,
           handoff: "idle",
+          continueAfterHandoff: false,
           capturedPremium:
             config?.premiumSource === "current" && current
               ? { ...current, thinkingLevel: pi.getThinkingLevel() }
