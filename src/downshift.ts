@@ -208,7 +208,7 @@ function coreDeps(pi: ExtensionAPI, ctx: ExtensionContext) {
     ) => pi.sendUserMessage(prompt, options),
     switchToTarget: (target: ModelTarget, position: Position, reason: string) =>
       switchToTarget(pi, ctx, target, position, reason),
-    updateStatus: () => updateStatus(ctx),
+    updateStatus: (config?: DownshiftConfig) => updateStatus(ctx, config),
     notify: (message: string, level?: string) =>
       ctx.ui.notify(message, level as any),
   };

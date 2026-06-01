@@ -56,7 +56,7 @@ export type CoreDeps = {
     position: Position,
     reason: string,
   ) => Promise<boolean>;
-  updateStatus: () => void;
+  updateStatus: (config?: DownshiftConfig) => void;
   notify: (message: string, level?: string) => void;
 };
 
@@ -219,9 +219,10 @@ export async function requestHandoff(
   deps: CoreDeps,
   runtime: Runtime,
   delivery: HandoffDelivery,
+  config?: DownshiftConfig,
 ): Promise<DownshiftState> {
   setState(deps, runtime, { handoff: "requested", lastError: undefined });
-  deps.updateStatus();
+  deps.updateStatus(config);
   deps.notify("downshift: preparing handoff before economy switch", "info");
   try {
     const prompt = buildHandoffPrompt();
@@ -248,7 +249,7 @@ export async function forceDownshiftNow(
   delivery: HandoffDelivery,
 ): Promise<DownshiftState> {
   const config = await deps.readConfig();
-  deps.updateStatus();
+  deps.updateStatus(config);
   if (!config) {
     deps.notify("downshift: config missing", "warning");
     return runtime.state;
@@ -275,7 +276,7 @@ export async function forceDownshiftNow(
     deps.notify("downshift: handoff already pending", "info");
     return runtime.state;
   }
-  return requestHandoff(deps, runtime, delivery);
+  return requestHandoff(deps, runtime, delivery, config);
 }
 
 export async function completeHandoffAndSwitch(
@@ -292,7 +293,7 @@ export async function completeHandoffAndSwitch(
     if (!runtime.state.paused && runtime.state.position !== "economy") {
       setState(deps, runtime, { handoff: "idle" });
     }
-    deps.updateStatus();
+    deps.updateStatus(config);
     return runtime.state;
   }
   setState(deps, runtime, { handoff: "done" });
@@ -303,7 +304,7 @@ export async function completeHandoffAndSwitch(
   );
   if (switched)
     setState(deps, runtime, { position: "economy", lastError: undefined });
-  deps.updateStatus();
+  deps.updateStatus(config);
   return runtime.state;
 }
 
@@ -313,7 +314,7 @@ export async function maybeDownshift(
   ctx: UsageContext,
 ): Promise<DownshiftState> {
   const config = await deps.readConfig();
-  deps.updateStatus();
+  deps.updateStatus(config);
   if (
     !config?.enabled ||
     !runtime.state.sessionEnabled ||
@@ -329,7 +330,7 @@ export async function maybeDownshift(
   if (!thresholdReached(ctx.getContextUsage(), config.threshold))
     return runtime.state;
   if (config.handoffBeforeDownshift && runtime.state.handoff === "idle") {
-    return requestHandoff(deps, runtime, "followUp");
+    return requestHandoff(deps, runtime, "followUp", config);
   }
   const switched = await deps.switchToTarget(
     config.economy,
@@ -342,7 +343,7 @@ export async function maybeDownshift(
       handoff: "done",
       lastError: undefined,
     });
-  deps.updateStatus();
+  deps.updateStatus(config);
   return runtime.state;
 }
 
@@ -352,7 +353,7 @@ export async function maybeUpshift(
   ctx: UsageContext,
 ): Promise<DownshiftState> {
   const config = await deps.readConfig();
-  deps.updateStatus();
+  deps.updateStatus(config);
   if (
     !config?.enabled ||
     !config.upshiftAfterCompaction ||
@@ -381,7 +382,7 @@ export async function maybeUpshift(
       handoff: "idle",
       lastError: undefined,
     });
-  deps.updateStatus();
+  deps.updateStatus(config);
   return runtime.state;
 }
 
@@ -422,7 +423,7 @@ export async function handleManualModelSelect(
   if (event.source === "restore") return runtime.state;
   const config = await deps.readConfig();
   if (!config?.enabled || !runtime.state.sessionEnabled) {
-    deps.updateStatus();
+    deps.updateStatus(config);
     return runtime.state;
   }
   setState(deps, runtime, {
@@ -431,6 +432,6 @@ export async function handleManualModelSelect(
     handoff: "idle",
     lastError: "manual model change",
   });
-  deps.updateStatus();
+  deps.updateStatus(config);
   return runtime.state;
 }
