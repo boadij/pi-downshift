@@ -1,1 +1,5 @@
 .DS_Store
+.backlog/
+.onion/
+.chatbridge/
+AGENTS.md
