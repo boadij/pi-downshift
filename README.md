@@ -72,15 +72,7 @@ Run:
 /downshift config
 ```
 
-You will be prompted to choose:
-
-- Whether Downshift is enabled
-- A context threshold
-- An economy model
-- Whether premium means the current session model or an explicit model
-- Whether fresh sessions should start on premium
-- Whether to upshift after compaction
-- Whether to create a handoff note before downshifting
+If no config exists yet, Downshift guides you through the initial setup. After that, the command opens a small menu showing the current values so you can edit individual settings.
 
 ## Commands ⌨️
 
@@ -98,7 +90,7 @@ Shows the current mode, context usage, remaining threshold budget, premium targe
 
 ### `/downshift config`
 
-Opens the interactive setup flow.
+Opens the interactive config menu. Existing configs can be edited one setting at a time without reselecting everything. On first setup, Downshift runs a guided setup flow.
 
 ### `/downshift now`
 

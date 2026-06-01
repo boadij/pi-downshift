@@ -35,6 +35,16 @@ type StateEntry = Partial<DownshiftState> & { version?: number };
 
 type Runtime = { state: DownshiftState };
 
+type ConfigField =
+  | "enabled"
+  | "threshold"
+  | "economy"
+  | "premiumSource"
+  | "premium"
+  | "startOnPremium"
+  | "upshiftAfterCompaction"
+  | "handoffBeforeDownshift";
+
 let runtime: Runtime = { state: createInitialState() };
 let internalModelChange = false;
 
@@ -237,9 +247,20 @@ async function selectTarget(
     ctx.ui.notify("No models available", "error");
     return undefined;
   }
+  const labels = models.map((model) => `${model.provider}/${model.id}`);
+  const currentModelLabel = current
+    ? `${current.provider}/${current.model}`
+    : undefined;
+  const orderedLabels =
+    currentModelLabel && labels.includes(currentModelLabel)
+      ? [
+          currentModelLabel,
+          ...labels.filter((label) => label !== currentModelLabel),
+        ]
+      : labels;
   const selected = await ctx.ui.select(
     current ? `${title} (current: ${targetLabel(current)})` : title,
-    models.map((model) => `${model.provider}/${model.id}`),
+    orderedLabels,
   );
   if (!selected) return undefined;
   const slash = selected.indexOf("/");
@@ -250,7 +271,18 @@ async function selectTarget(
   );
   if (!model) return undefined;
   const levels = getSupportedThinkingLevels(model);
-  const selectedLevel = await ctx.ui.select("Select thinking level", levels);
+  const orderedLevels =
+    current?.thinkingLevel &&
+    levels.includes(current.thinkingLevel as ThinkingLevel)
+      ? [
+          current.thinkingLevel as ThinkingLevel,
+          ...levels.filter((level) => level !== current.thinkingLevel),
+        ]
+      : levels;
+  const selectedLevel = await ctx.ui.select(
+    "Select thinking level",
+    orderedLevels,
+  );
   if (!selectedLevel) return undefined;
   return { provider, model: modelId, thinkingLevel: selectedLevel };
 }
@@ -266,40 +298,124 @@ async function promptNumber(
   return Number.isFinite(value) && value > 0 ? value : undefined;
 }
 
-async function configure(ctx: ExtensionCommandContext): Promise<void> {
-  if (!ctx.hasUI) return;
-  const previous = await readConfig();
-  const enabled = await ctx.ui.confirm("Downshift", "Enable downshift?");
-  const thresholdMode = await ctx.ui.select("Threshold", [
-    "tokens",
-    "percent",
-    "both",
-  ]);
-  if (!thresholdMode) return;
+function yesNo(value: boolean | undefined): string {
+  return value ? "yes" : "no";
+}
+
+function optionalTargetLabel(target: ModelTarget | undefined): string {
+  return target ? targetLabel(target) : "unset";
+}
+
+function premiumSourceLabel(config: DownshiftConfig): string {
+  return config.premiumSource === "explicit" ? "explicit" : "current";
+}
+
+function premiumLabel(config: DownshiftConfig): string {
+  if (config.premiumSource === "current") return "current session model";
+  return optionalTargetLabel(config.premium);
+}
+
+function configMenuItems(config: DownshiftConfig): string[] {
+  return [
+    `enabled: ${yesNo(config.enabled)}`,
+    `threshold: ${formatThreshold(config.threshold)}`,
+    `economy: ${targetLabel(config.economy)}`,
+    `premium source: ${premiumSourceLabel(config)}`,
+    `premium model: ${premiumLabel(config)}`,
+    `start on premium: ${yesNo(config.startOnPremium)}`,
+    `upshift after compaction: ${yesNo(config.upshiftAfterCompaction)}`,
+    `handoff note: ${yesNo(config.handoffBeforeDownshift)}`,
+    "done",
+  ];
+}
+
+function configFieldFromMenuItem(
+  item: string,
+): ConfigField | "done" | undefined {
+  if (item.startsWith("enabled:")) return "enabled";
+  if (item.startsWith("threshold:")) return "threshold";
+  if (item.startsWith("economy:")) return "economy";
+  if (item.startsWith("premium source:")) return "premiumSource";
+  if (item.startsWith("premium model:")) return "premium";
+  if (item.startsWith("start on premium:")) return "startOnPremium";
+  if (item.startsWith("upshift after compaction:"))
+    return "upshiftAfterCompaction";
+  if (item.startsWith("handoff note:")) return "handoffBeforeDownshift";
+  if (item === "done") return "done";
+  return undefined;
+}
+
+async function selectBoolean(
+  ctx: ExtensionCommandContext,
+  title: string,
+  current: boolean,
+): Promise<boolean | undefined> {
+  const options = current ? ["yes", "no"] : ["no", "yes"];
+  const selected = await ctx.ui.select(
+    `${title} (current: ${yesNo(current)})`,
+    options,
+  );
+  if (!selected) return undefined;
+  return selected === "yes";
+}
+
+async function editThreshold(
+  ctx: ExtensionCommandContext,
+  previous: Threshold,
+): Promise<Threshold | undefined> {
+  const currentMode =
+    previous.tokens !== undefined && previous.percent !== undefined
+      ? "both"
+      : previous.tokens !== undefined
+        ? "tokens"
+        : "percent";
+  const thresholdMode = await ctx.ui.select(
+    `Threshold (current: ${formatThreshold(previous)})`,
+    [
+      currentMode,
+      ...["tokens", "percent", "both"].filter((mode) => mode !== currentMode),
+    ],
+  );
+  if (!thresholdMode) return undefined;
   const threshold: Threshold = {};
   if (thresholdMode === "tokens" || thresholdMode === "both") {
     const tokens = await promptNumber(
       ctx,
       "Token threshold",
-      previous?.threshold.tokens?.toString() ?? "100000",
+      previous.tokens?.toString() ?? "100000",
     );
-    if (!tokens) return ctx.ui.notify("Invalid token threshold", "error");
+    if (!tokens) {
+      ctx.ui.notify("Invalid token threshold", "error");
+      return undefined;
+    }
     threshold.tokens = tokens;
   }
   if (thresholdMode === "percent" || thresholdMode === "both") {
     const percent = await promptNumber(
       ctx,
       "Percent threshold",
-      previous?.threshold.percent?.toString() ?? "60",
+      previous.percent?.toString() ?? "60",
     );
-    if (!percent) return ctx.ui.notify("Invalid percent threshold", "error");
+    if (!percent) {
+      ctx.ui.notify("Invalid percent threshold", "error");
+      return undefined;
+    }
+    if (percent > 100) {
+      ctx.ui.notify("Percent threshold must be 100 or less", "error");
+      return undefined;
+    }
     threshold.percent = percent;
   }
-  const economy = await selectTarget(
-    ctx,
-    "Select economy model",
-    previous?.economy,
-  );
+  return threshold;
+}
+
+async function configureInitial(ctx: ExtensionCommandContext): Promise<void> {
+  if (!ctx.hasUI) return;
+  const enabled = await selectBoolean(ctx, "Enable downshift?", true);
+  if (enabled === undefined) return;
+  const threshold = await editThreshold(ctx, { tokens: 100000, percent: 60 });
+  if (!threshold) return;
+  const economy = await selectTarget(ctx, "Select economy model");
   if (!economy) return;
   const premiumMode = await ctx.ui.select("Premium source", [
     "current session model",
@@ -310,23 +426,27 @@ async function configure(ctx: ExtensionCommandContext): Promise<void> {
     premiumMode === "explicit premium model" ? "explicit" : "current";
   const premium =
     premiumSource === "explicit"
-      ? await selectTarget(ctx, "Select premium model", previous?.premium)
+      ? await selectTarget(ctx, "Select premium model")
       : undefined;
   if (premiumSource === "explicit" && !premium) return;
-  const startOnPremium = await ctx.ui.confirm(
-    "Start on premium",
-    "Switch fresh sessions to premium automatically?",
+  const startOnPremium = await selectBoolean(
+    ctx,
+    "Start fresh sessions on premium?",
+    true,
   );
-  const upshiftAfterCompaction = await ctx.ui.confirm(
-    "Upshift",
-    "Upshift after compaction when below threshold?",
+  if (startOnPremium === undefined) return;
+  const upshiftAfterCompaction = await selectBoolean(
+    ctx,
+    "Upshift after compaction?",
+    true,
   );
-  const previousHandoff = previous?.handoffBeforeDownshift ?? true;
-  const handoffChoice = await ctx.ui.select(
-    `Handoff (current: ${previousHandoff ? "yes" : "no"})`,
-    ["yes", "no"],
+  if (upshiftAfterCompaction === undefined) return;
+  const handoffBeforeDownshift = await selectBoolean(
+    ctx,
+    "Create handoff note before downshifting?",
+    true,
   );
-  if (!handoffChoice) return;
+  if (handoffBeforeDownshift === undefined) return;
   await writeConfig({
     enabled,
     threshold,
@@ -335,9 +455,133 @@ async function configure(ctx: ExtensionCommandContext): Promise<void> {
     premium,
     startOnPremium,
     upshiftAfterCompaction,
-    handoffBeforeDownshift: handoffChoice === "yes",
+    handoffBeforeDownshift,
   });
-  ctx.ui.notify("downshift config saved", "info");
+  ctx.ui.notify("downshift config created", "info");
+}
+
+async function configureMenu(
+  ctx: ExtensionCommandContext,
+  initial: DownshiftConfig,
+): Promise<void> {
+  let config = initial;
+  while (true) {
+    const selected = await ctx.ui.select(
+      "Downshift config",
+      configMenuItems(config),
+    );
+    if (!selected) return;
+    const field = configFieldFromMenuItem(selected);
+    if (!field) return;
+    if (field === "done") {
+      ctx.ui.notify("downshift config closed", "info");
+      return;
+    }
+    const next = await editConfigField(ctx, config, field);
+    if (!next) continue;
+    config = next;
+    await writeConfig(config);
+    ctx.ui.notify("downshift config saved", "info");
+  }
+}
+
+async function editConfigField(
+  ctx: ExtensionCommandContext,
+  config: DownshiftConfig,
+  field: ConfigField,
+): Promise<DownshiftConfig | undefined> {
+  switch (field) {
+    case "enabled": {
+      const enabled = await selectBoolean(
+        ctx,
+        "Enable downshift?",
+        config.enabled,
+      );
+      return enabled === undefined ? undefined : { ...config, enabled };
+    }
+    case "threshold": {
+      const threshold = await editThreshold(ctx, config.threshold);
+      return threshold ? { ...config, threshold } : undefined;
+    }
+    case "economy": {
+      const economy = await selectTarget(
+        ctx,
+        "Select economy model",
+        config.economy,
+      );
+      return economy ? { ...config, economy } : undefined;
+    }
+    case "premiumSource": {
+      const currentLabel =
+        config.premiumSource === "explicit"
+          ? "explicit premium model"
+          : "current session model";
+      const selected = await ctx.ui.select(
+        `Premium source (current: ${currentLabel})`,
+        [
+          currentLabel,
+          ...["current session model", "explicit premium model"].filter(
+            (item) => item !== currentLabel,
+          ),
+        ],
+      );
+      if (!selected) return undefined;
+      const premiumSource =
+        selected === "explicit premium model" ? "explicit" : "current";
+      if (premiumSource === "explicit" && !config.premium) {
+        const premium = await selectTarget(ctx, "Select premium model");
+        if (!premium) return undefined;
+        return { ...config, premiumSource, premium };
+      }
+      return { ...config, premiumSource };
+    }
+    case "premium": {
+      const premium = await selectTarget(
+        ctx,
+        "Select premium model",
+        config.premium,
+      );
+      if (!premium) return undefined;
+      return { ...config, premiumSource: "explicit", premium };
+    }
+    case "startOnPremium": {
+      const startOnPremium = await selectBoolean(
+        ctx,
+        "Start fresh sessions on premium?",
+        config.startOnPremium,
+      );
+      return startOnPremium === undefined
+        ? undefined
+        : { ...config, startOnPremium };
+    }
+    case "upshiftAfterCompaction": {
+      const upshiftAfterCompaction = await selectBoolean(
+        ctx,
+        "Upshift after compaction?",
+        config.upshiftAfterCompaction,
+      );
+      return upshiftAfterCompaction === undefined
+        ? undefined
+        : { ...config, upshiftAfterCompaction };
+    }
+    case "handoffBeforeDownshift": {
+      const handoffBeforeDownshift = await selectBoolean(
+        ctx,
+        "Create handoff note before downshifting?",
+        config.handoffBeforeDownshift,
+      );
+      return handoffBeforeDownshift === undefined
+        ? undefined
+        : { ...config, handoffBeforeDownshift };
+    }
+  }
+}
+
+async function configure(ctx: ExtensionCommandContext): Promise<void> {
+  if (!ctx.hasUI) return;
+  const previous = await readConfig();
+  if (!previous) return configureInitial(ctx);
+  return configureMenu(ctx, previous);
 }
 
 function formatUsage(usage: ContextUsage | undefined): string {
