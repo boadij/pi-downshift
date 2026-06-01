@@ -72,7 +72,7 @@ Run:
 /downshift config
 ```
 
-If no config exists yet, Downshift guides you through the initial setup. After that, the command opens a small menu showing the current values so you can edit individual settings.
+If no config exists yet, Downshift launches the guided setup using safe defaults for opt-in behavior and thresholds. After that, the command opens a small menu showing the current values so you can edit individual settings.
 
 ## Commands ⌨️
 
@@ -115,7 +115,7 @@ Downshift stores its config in Pi's agent directory as `downshift.json`.
   "enabled": true,
   "threshold": {
     "tokens": 100000,
-    "percent": 60
+    "percent": 50
   },
   "economy": {
     "provider": "openai",
@@ -124,7 +124,7 @@ Downshift stores its config in Pi's agent directory as `downshift.json`.
   },
   "premiumSource": "current",
   "startOnPremium": true,
-  "upshiftAfterCompaction": true,
+  "upshiftAfterCompaction": false,
   "handoffBeforeDownshift": true
 }
 ```

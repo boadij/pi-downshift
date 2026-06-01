@@ -39,7 +39,6 @@ type ConfigField =
   | "enabled"
   | "threshold"
   | "economy"
-  | "premiumSource"
   | "premium"
   | "startOnPremium"
   | "upshiftAfterCompaction"
@@ -320,8 +319,7 @@ function configMenuItems(config: DownshiftConfig): string[] {
     `enabled: ${yesNo(config.enabled)}`,
     `threshold: ${formatThreshold(config.threshold)}`,
     `economy: ${targetLabel(config.economy)}`,
-    `premium source: ${premiumSourceLabel(config)}`,
-    `premium model: ${premiumLabel(config)}`,
+    `premium: ${premiumSourceLabel(config)} (${premiumLabel(config)})`,
     `start on premium: ${yesNo(config.startOnPremium)}`,
     `upshift after compaction: ${yesNo(config.upshiftAfterCompaction)}`,
     `handoff note: ${yesNo(config.handoffBeforeDownshift)}`,
@@ -335,8 +333,7 @@ function configFieldFromMenuItem(
   if (item.startsWith("enabled:")) return "enabled";
   if (item.startsWith("threshold:")) return "threshold";
   if (item.startsWith("economy:")) return "economy";
-  if (item.startsWith("premium source:")) return "premiumSource";
-  if (item.startsWith("premium model:")) return "premium";
+  if (item.startsWith("premium:")) return "premium";
   if (item.startsWith("start on premium:")) return "startOnPremium";
   if (item.startsWith("upshift after compaction:"))
     return "upshiftAfterCompaction";
@@ -357,6 +354,37 @@ async function selectBoolean(
   );
   if (!selected) return undefined;
   return selected === "yes";
+}
+
+async function selectPremium(
+  ctx: ExtensionCommandContext,
+  previous?: DownshiftConfig,
+): Promise<Pick<DownshiftConfig, "premiumSource" | "premium"> | undefined> {
+  const currentLabel =
+    previous?.premiumSource === "explicit"
+      ? "explicit premium model"
+      : "current session model";
+  const premiumMode = await ctx.ui.select(
+    previous ? `Premium source (current: ${currentLabel})` : "Premium source",
+    [
+      currentLabel,
+      ...["current session model", "explicit premium model"].filter(
+        (item) => item !== currentLabel,
+      ),
+    ],
+  );
+  if (!premiumMode) return undefined;
+  const premiumSource =
+    premiumMode === "explicit premium model" ? "explicit" : "current";
+  if (premiumSource === "current") {
+    return { premiumSource, premium: previous?.premium };
+  }
+  const premium = await selectTarget(
+    ctx,
+    "Select premium model",
+    previous?.premium,
+  );
+  return premium ? { premiumSource, premium } : undefined;
 }
 
 async function editThreshold(
@@ -413,49 +441,26 @@ async function configureInitial(ctx: ExtensionCommandContext): Promise<void> {
   if (!ctx.hasUI) return;
   const enabled = await selectBoolean(ctx, "Enable downshift?", true);
   if (enabled === undefined) return;
-  const threshold = await editThreshold(ctx, { tokens: 100000, percent: 60 });
-  if (!threshold) return;
-  const economy = await selectTarget(ctx, "Select economy model");
-  if (!economy) return;
-  const premiumMode = await ctx.ui.select("Premium source", [
-    "current session model",
-    "explicit premium model",
-  ]);
-  if (!premiumMode) return;
-  const premiumSource =
-    premiumMode === "explicit premium model" ? "explicit" : "current";
-  const premium =
-    premiumSource === "explicit"
-      ? await selectTarget(ctx, "Select premium model")
-      : undefined;
-  if (premiumSource === "explicit" && !premium) return;
+  const premiumConfig = await selectPremium(ctx);
+  if (!premiumConfig) return;
   const startOnPremium = await selectBoolean(
     ctx,
     "Start fresh sessions on premium?",
     true,
   );
   if (startOnPremium === undefined) return;
-  const upshiftAfterCompaction = await selectBoolean(
-    ctx,
-    "Upshift after compaction?",
-    true,
-  );
-  if (upshiftAfterCompaction === undefined) return;
-  const handoffBeforeDownshift = await selectBoolean(
-    ctx,
-    "Create handoff note before downshifting?",
-    true,
-  );
-  if (handoffBeforeDownshift === undefined) return;
+  const threshold = { tokens: 100000, percent: 50 };
+  const economy = await selectTarget(ctx, "Select economy model");
+  if (!economy) return;
   await writeConfig({
     enabled,
     threshold,
     economy,
-    premiumSource,
-    premium,
+    premiumSource: premiumConfig.premiumSource,
+    premium: premiumConfig.premium,
     startOnPremium,
-    upshiftAfterCompaction,
-    handoffBeforeDownshift,
+    upshiftAfterCompaction: false,
+    handoffBeforeDownshift: true,
   });
   ctx.ui.notify("downshift config created", "info");
 }
@@ -511,38 +516,9 @@ async function editConfigField(
       );
       return economy ? { ...config, economy } : undefined;
     }
-    case "premiumSource": {
-      const currentLabel =
-        config.premiumSource === "explicit"
-          ? "explicit premium model"
-          : "current session model";
-      const selected = await ctx.ui.select(
-        `Premium source (current: ${currentLabel})`,
-        [
-          currentLabel,
-          ...["current session model", "explicit premium model"].filter(
-            (item) => item !== currentLabel,
-          ),
-        ],
-      );
-      if (!selected) return undefined;
-      const premiumSource =
-        selected === "explicit premium model" ? "explicit" : "current";
-      if (premiumSource === "explicit" && !config.premium) {
-        const premium = await selectTarget(ctx, "Select premium model");
-        if (!premium) return undefined;
-        return { ...config, premiumSource, premium };
-      }
-      return { ...config, premiumSource };
-    }
     case "premium": {
-      const premium = await selectTarget(
-        ctx,
-        "Select premium model",
-        config.premium,
-      );
-      if (!premium) return undefined;
-      return { ...config, premiumSource: "explicit", premium };
+      const premiumConfig = await selectPremium(ctx, config);
+      return premiumConfig ? { ...config, ...premiumConfig } : undefined;
     }
     case "startOnPremium": {
       const startOnPremium = await selectBoolean(
@@ -708,7 +684,11 @@ export default function downshift(pi: ExtensionAPI): void {
   pi.registerCommand("downshift", {
     description: "Configure automatic model downshifting by context threshold",
     handler: async (args, ctx) => {
-      const command = args.trim() || "status";
+      const command = args.trim();
+      if (!command) {
+        const config = await readConfig();
+        return config ? showStatus(ctx) : configureInitial(ctx);
+      }
       if (command === "config") return configure(ctx);
       if (command === "status") return showStatus(ctx);
       if (command === "now") {
