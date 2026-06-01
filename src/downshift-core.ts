@@ -40,14 +40,16 @@ export type ContextUsageLike = {
 
 type StateEntry = Partial<DownshiftState> & { version?: number };
 
-type Runtime = { state: DownshiftState };
+export type Runtime = { state: DownshiftState };
 
-type CoreDeps = {
+export type HandoffDelivery = "immediate" | "followUp" | "steer";
+
+export type CoreDeps = {
   readConfig: () => Promise<DownshiftConfig | undefined>;
   saveState: (state: DownshiftState) => void;
   sendUserMessage: (
     prompt: string,
-    options: { deliverAs: "followUp" },
+    options?: { deliverAs: Exclude<HandoffDelivery, "immediate"> },
   ) => void | Promise<void>;
   switchToTarget: (
     target: ModelTarget,
@@ -216,12 +218,18 @@ function buildHandoffPrompt(): string {
 export async function requestHandoff(
   deps: CoreDeps,
   runtime: Runtime,
+  delivery: HandoffDelivery,
 ): Promise<DownshiftState> {
   setState(deps, runtime, { handoff: "requested", lastError: undefined });
   deps.updateStatus();
   deps.notify("downshift: preparing handoff before economy switch", "info");
   try {
-    await deps.sendUserMessage(buildHandoffPrompt(), { deliverAs: "followUp" });
+    const prompt = buildHandoffPrompt();
+    if (delivery === "immediate") {
+      await deps.sendUserMessage(prompt);
+    } else {
+      await deps.sendUserMessage(prompt, { deliverAs: delivery });
+    }
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     setState(deps, runtime, {
@@ -232,6 +240,42 @@ export async function requestHandoff(
     deps.notify(`downshift paused: ${message}`, "error");
   }
   return runtime.state;
+}
+
+export async function forceDownshiftNow(
+  deps: CoreDeps,
+  runtime: Runtime,
+  delivery: HandoffDelivery,
+): Promise<DownshiftState> {
+  const config = await deps.readConfig();
+  deps.updateStatus();
+  if (!config) {
+    deps.notify("downshift: config missing", "warning");
+    return runtime.state;
+  }
+  if (!config.enabled) {
+    deps.notify("downshift: disabled in config", "warning");
+    return runtime.state;
+  }
+  if (!runtime.state.sessionEnabled || runtime.state.paused) {
+    setState(deps, runtime, {
+      sessionEnabled: true,
+      paused: false,
+      lastError: undefined,
+    });
+  }
+  if (runtime.state.position === "economy") {
+    deps.notify("downshift: already on economy", "info");
+    return runtime.state;
+  }
+  if (
+    runtime.state.handoff === "requested" ||
+    runtime.state.handoff === "active"
+  ) {
+    deps.notify("downshift: handoff already pending", "info");
+    return runtime.state;
+  }
+  return requestHandoff(deps, runtime, delivery);
 }
 
 export async function completeHandoffAndSwitch(
@@ -285,7 +329,7 @@ export async function maybeDownshift(
   if (!thresholdReached(ctx.getContextUsage(), config.threshold))
     return runtime.state;
   if (config.handoffBeforeDownshift && runtime.state.handoff === "idle") {
-    return requestHandoff(deps, runtime);
+    return requestHandoff(deps, runtime, "followUp");
   }
   const switched = await deps.switchToTarget(
     config.economy,

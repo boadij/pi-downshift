@@ -84,6 +84,7 @@ You will be prompted to choose:
 
 ```text
 /downshift status
+/downshift now
 /downshift config
 /downshift on
 /downshift off
@@ -96,6 +97,12 @@ Shows the current mode, context usage, remaining threshold budget, premium targe
 ### `/downshift config`
 
 Opens the interactive setup flow.
+
+### `/downshift now`
+
+Starts the handoff immediately, regardless of the configured threshold.
+
+If the agent is idle, Downshift asks the currently running model to write the handoff note now. If the agent is already running, Downshift uses Pi's steering delivery so the handoff request is injected before the next model call using the currently running model. After the handoff note is written, Downshift switches to the configured economy model.
 
 ### `/downshift off`
 

@@ -12,6 +12,7 @@ import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import {
   HANDOFF_MARKER,
   createInitialState,
+  forceDownshiftNow,
   handleAgentEnd,
   handleBeforeAgentStart,
   handleManualModelSelect,
@@ -201,8 +202,10 @@ function coreDeps(pi: ExtensionAPI, ctx: ExtensionContext) {
       runtime.state = next;
       saveState(pi);
     },
-    sendUserMessage: (prompt: string, options: { deliverAs: "followUp" }) =>
-      pi.sendUserMessage(prompt, options),
+    sendUserMessage: (
+      prompt: string,
+      options?: { deliverAs: "followUp" | "steer" },
+    ) => pi.sendUserMessage(prompt, options),
     switchToTarget: (target: ModelTarget, position: Position, reason: string) =>
       switchToTarget(pi, ctx, target, position, reason),
     updateStatus: () => updateStatus(ctx),
@@ -394,7 +397,7 @@ async function showStatus(ctx: ExtensionCommandContext): Promise<void> {
     `handoff state: ${runtime.state.handoff}`,
     `upshift: ${config?.upshiftAfterCompaction ? "on" : "off"}`,
     `source: ${config?.premiumSource ?? "current"}`,
-    `commands: /downshift status | on | off | config`,
+    `commands: /downshift status | now | on | off | config`,
   ];
   if (runtime.state.lastError)
     lines.push(`last error: ${runtime.state.lastError}`);
@@ -458,6 +461,15 @@ export default function downshift(pi: ExtensionAPI): void {
       const command = args.trim() || "status";
       if (command === "config") return configure(ctx);
       if (command === "status") return showStatus(ctx);
+      if (command === "now") {
+        await forceDownshiftNow(
+          coreDeps(pi, ctx),
+          runtime,
+          ctx.isIdle() ? "immediate" : "steer",
+        );
+        updateStatus(ctx, await readConfig());
+        return;
+      }
       if (command === "off") {
         saveState(pi, { sessionEnabled: false, handoff: "idle" });
         updateStatus(ctx, await readConfig());
@@ -483,7 +495,10 @@ export default function downshift(pi: ExtensionAPI): void {
         ctx.ui.notify("downshift on for this session", "info");
         return;
       }
-      ctx.ui.notify("Usage: /downshift status | on | off | config", "warning");
+      ctx.ui.notify(
+        "Usage: /downshift status | now | on | off | config",
+        "warning",
+      );
     },
   });
 }

@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi, type Mock } from "vitest";
 import {
   HANDOFF_MARKER,
+  forceDownshiftNow,
   handleAgentEnd,
   handleBeforeAgentStart,
   handleManualModelSelect,
@@ -31,7 +32,10 @@ type TestDeps = {
   readConfig: Mock<() => Promise<DownshiftConfig | undefined>>;
   saveState: Mock<(state: DownshiftState) => void>;
   sendUserMessage: Mock<
-    (prompt: string, options: { deliverAs: "followUp" }) => Promise<void>
+    (
+      prompt: string,
+      options?: { deliverAs: "followUp" | "steer" },
+    ) => Promise<void>
   >;
   switchToTarget: Mock<
     (
@@ -100,6 +104,40 @@ describe("downshift core", () => {
     expect(deps.sendUserMessage).not.toHaveBeenCalled();
     expect(deps.switchToTarget).not.toHaveBeenCalled();
     expect(runtime.state.handoff).toBe("requested");
+  });
+
+  it("queues a steer handoff for manual now", async () => {
+    const deps = createDeps();
+    const runtime = { state: createState() };
+
+    await forceDownshiftNow(deps, runtime, "steer");
+
+    expect(runtime.state.handoff).toBe("requested");
+    expect(runtime.state.position).toBe("premium");
+    expect(deps.sendUserMessage).toHaveBeenCalledWith(expect.any(String), {
+      deliverAs: "steer",
+    });
+    expect(deps.switchToTarget).not.toHaveBeenCalled();
+  });
+
+  it("sends manual now immediately when requested", async () => {
+    const deps = createDeps();
+    const runtime = { state: createState() };
+
+    await forceDownshiftNow(deps, runtime, "immediate");
+
+    expect(deps.sendUserMessage).toHaveBeenCalledWith(expect.any(String));
+    expect(deps.sendUserMessage.mock.calls[0][1]).toBeUndefined();
+  });
+
+  it("does not duplicate manual now while handoff is pending", async () => {
+    const deps = createDeps();
+    const runtime = { state: createState({ handoff: "requested" }) };
+
+    await forceDownshiftNow(deps, runtime, "steer");
+
+    expect(deps.sendUserMessage).not.toHaveBeenCalled();
+    expect(deps.switchToTarget).not.toHaveBeenCalled();
   });
 
   it("switches to economy after handoff agent turn ends", async () => {
