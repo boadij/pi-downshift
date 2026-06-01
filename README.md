@@ -53,7 +53,7 @@ It is a deterministic context-cost governor.
 ## Install 📦
 
 ```bash
-pi install npm:<your-package-name>
+pi install npm:@boadij/pi-downshift
 ```
 
 Then reload Pi:
@@ -140,6 +140,12 @@ A coding session often has two phases:
 
 Downshift automates that handoff with a threshold.
 
+## Prompt caching 💾
+
+Downshift works best with providers that support prompt caching. The premium model creates the expensive shared context once, then the economy model continues from the same conversation after the threshold is reached.
+
+Prompt caching can reduce the cost of repeatedly sending that accumulated context, while Downshift reduces the cost of future generation by moving execution to a cheaper model. The two optimizations are complementary: caching helps pay less for the context you must keep, and Downshift helps pay less for the work that remains.
+
 Model selection uses Pi's public model registry. Downshift no longer reads Pi's internal settings file or imports private resolver internals. The picker may show more available models than before, but the extension is now portable and does not depend on local install paths.
 
 ## Status indicator 📊
@@ -185,6 +191,32 @@ Downshift is for a narrower case:
 
 That narrower scope makes Downshift easier to reason about, easier to configure, and less surprising during long coding sessions.
 
+## Local development 🛠️
+
+Run the checks:
+
+```bash
+npm run check
+```
+
+Test locally without publishing:
+
+```bash
+pi -e .
+```
+
+Or install from the local package path:
+
+```bash
+pi install .
+```
+
+Then reload Pi:
+
+```text
+/reload
+```
+
 ## License 📄
 
-MIT
+Apache-2.0
