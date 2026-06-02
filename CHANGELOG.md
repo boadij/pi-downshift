@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.2.4](https://github.com/boadij/pi-downshift/compare/v0.2.2...v0.2.4) (2026-06-02)
+
+
+### Miscellaneous Chores
+
+* release 0.2.3 ([4a95269](https://github.com/boadij/pi-downshift/commit/4a952693d999b0a07f0c1f356ca1b068fe56d1ce))
+* release 0.2.4 ([6a3d526](https://github.com/boadij/pi-downshift/commit/6a3d526938658b045a20cac2283a1da8bc87f39e))
+
 ## [0.2.2](https://github.com/boadij/pi-downshift/compare/v0.2.1...v0.2.2) (2026-06-02)
 
 
