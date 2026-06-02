@@ -39,7 +39,7 @@ This keeps Downshift simple: premium handles orientation, economy handles contin
 - Asks the premium model for a compact handoff note before switching
 - Switches to a configured economy model after a token or percent threshold
 - Supports token thresholds, percent thresholds, or both
-- Preserves session state
+- Remembers whether the session is premium, economy, paused, or mid-handoff
 - Pauses automatically after manual model changes
 - Optionally switches back to premium after compaction
 - Shows a compact status indicator in the UI
@@ -97,9 +97,7 @@ Opens the interactive config menu. Existing configs can be edited one setting at
 
 ### `/downshift now`
 
-Starts the handoff immediately, regardless of the configured threshold.
-
-If the agent is idle, Downshift asks the current model to write the handoff note now, then switches to the configured economy model. If the agent is already running, Downshift uses Pi steering to inject the handoff before the next model call. After the handoff note is written, Downshift switches to economy and queues a continuation message so work can resume on the cheaper model.
+Starts the same handoff immediately, regardless of the configured threshold.
 
 ### `/downshift off`
 
@@ -150,11 +148,9 @@ Downshift automates that handoff with a threshold.
 
 ## Prompt caching 💾
 
-Downshift works best with providers that support prompt caching. The premium model creates the expensive shared context once, then the economy model continues from the same conversation after the threshold is reached.
+Downshift works best with providers that support prompt caching. The premium model creates the shared conversation context, then the economy model continues from that same context after the threshold is reached.
 
 Prompt caching can reduce the cost of repeatedly sending that accumulated context, while Downshift reduces the cost of future generation by moving execution to a cheaper model. The two optimizations are complementary: caching helps pay less for the context you must keep, and Downshift helps pay less for the work that remains.
-
-Model selection uses Pi's public model registry. Downshift no longer reads Pi's internal settings file or imports private resolver internals. The picker may show more available models than before, but the extension is now portable and does not depend on local install paths.
 
 ## Status indicator 📊
 
@@ -204,16 +200,6 @@ That narrower scope makes Downshift easier to reason about, easier to configure,
 Release notes are generated from Conventional Commits.
 
 See [GitHub Releases](https://github.com/boadij/pi-downshift/releases) or [CHANGELOG.md](https://github.com/boadij/pi-downshift/blob/main/CHANGELOG.md).
-
-## Release channels 🚦
-
-Stable releases are published to npm and can be installed with:
-
-```bash
-pi install npm:@boadij/pi-downshift
-```
-
-Development builds are tested locally with `pi -e .`, `pi install .`, or a local packed tarball before publishing.
 
 ## Local development 🛠️
 
