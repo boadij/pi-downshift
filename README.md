@@ -57,7 +57,7 @@ It is a deterministic context-cost governor.
 ## Install 📦
 
 ```bash
-pi install npm:@boadij/pi-downshift
+pi install npm:pi-downshift
 ```
 
 Then reload Pi:

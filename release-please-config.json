@@ -2,7 +2,7 @@
   "packages": {
     ".": {
       "release-type": "node",
-      "package-name": "@boadij/pi-downshift",
+      "package-name": "pi-downshift",
       "changelog-path": "CHANGELOG.md",
       "include-component-in-tag": false
     }

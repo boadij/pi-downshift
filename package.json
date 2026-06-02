@@ -1,5 +1,5 @@
 {
-  "name": "@boadij/pi-downshift",
+  "name": "pi-downshift",
   "version": "0.1.1",
   "description": "A tiny Pi Coding Agent extension that switches from a premium model to an economy model when your context gets expensive.",
   "type": "module",

@@ -32,8 +32,8 @@ Stable releases are controlled through Release Please.
 7. Verify:
 
 ```bash
-npm view @boadij/pi-downshift version
-pi install npm:@boadij/pi-downshift
+npm view pi-downshift version
+pi install npm:pi-downshift
 ```
 
 Stable releases must use tags like:
