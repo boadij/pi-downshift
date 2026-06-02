@@ -8,6 +8,7 @@ import {
   handleManualModelSelect,
   maybeDownshift,
   restoreStateFromEntries,
+  statusText,
   type DownshiftConfig,
   type DownshiftState,
   type ModelTarget,
@@ -77,6 +78,16 @@ const ctx = {
 
 describe("downshift core", () => {
   beforeEach(() => vi.clearAllMocks());
+
+  it("separates remaining token and percent thresholds with a pipe", () => {
+    expect(
+      statusText(
+        { ...baseConfig, threshold: { tokens: 100_000, percent: 50 } },
+        createState(),
+        { tokens: 58_000, percent: 32 },
+      ),
+    ).toBe("⇣ 42k | 18% → eco");
+  });
 
   it("queues a steering handoff when threshold is reached during agent work", async () => {
     const deps = createDeps();

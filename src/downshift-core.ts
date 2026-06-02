@@ -204,7 +204,7 @@ export function statusText(
     );
   }
 
-  return parts.length === 0 ? "⇣ ? → eco" : `⇣ ${parts.join(" / ")} → eco`;
+  return parts.length === 0 ? "⇣ ? → eco" : `⇣ ${parts.join(" | ")} → eco`;
 }
 
 function setState(

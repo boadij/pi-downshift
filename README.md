@@ -154,7 +154,7 @@ Model selection uses Pi's public model registry. Downshift no longer reads Pi's 
 Downshift adds a compact status label:
 
 ```text
-⇣ 42k / 18% → eco
+⇣ 42k | 18% → eco
 ```
 
 This means Downshift is active and will switch to the economy model when the configured context threshold is reached.
