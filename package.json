@@ -35,7 +35,8 @@
     "typecheck": "tsc --noEmit",
     "check": "npm run typecheck && npm test",
     "release:dry": "npm run check && npm pack --dry-run",
-    "prepublishOnly": "npm run check"
+    "prepublishOnly": "npm run check",
+    "release:as": "node scripts/release-as.mjs"
   },
   "peerDependencies": {
     "@earendil-works/pi-ai": "*",
