@@ -21,7 +21,9 @@
     "pi-coding-agent",
     "model-switching",
     "context-window",
-    "llm"
+    "llm",
+    "token-cost",
+    "subagents"
   ],
   "pi": {
     "extensions": [
