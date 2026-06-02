@@ -1,9 +1,15 @@
+
 # 🕹️ Downshift
 
 A tiny Pi Coding Agent extension that switches from a premium model to an economy model when your context gets expensive.
 
 Downshift is not a model router.
 It does one thing: **start strong, then downshift when context pressure crosses a threshold.**
+
+<p align="center">
+  <img src="banner.jpg" alt="Downshift preview: Start Premium. Finish Cheap.">
+</p>
+
 
 ## Why 💸
 
