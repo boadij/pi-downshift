@@ -1,79 +1,76 @@
 # Release
 
-## Checklist
+Downshift has two release channels:
 
-1. Confirm the working tree is clean enough to release.
+- Stable releases: GitHub Release + npm publish
+- Dev releases: GitHub prerelease only
 
-   ```bash
-   git status
-   ```
+## Commit format
 
-2. Run checks and inspect the package contents.
+Use Conventional Commits:
 
-   ```bash
-   npm run release:dry
-   ```
+```text
+fix: prevent duplicate handoff prompts
+feat: add steered continuation after handoff
+docs: clarify prompt caching behavior
+chore: update release workflow
+```
 
-3. Create a local package tarball.
+Release Please uses these commits to generate changelog entries and version bumps.
 
-   ```bash
-   npm pack
-   ```
+## Stable release flow
 
-4. Install the tarball in Pi and smoke test it.
+Stable releases are controlled through Release Please.
 
-   ```bash
-   pi install ./boadij-pi-downshift-<version>.tgz
-   ```
+1. Merge normal feature/fix PRs into `main`.
+2. Release Please opens or updates a release PR.
+3. Review the release PR.
+4. Merge the release PR when ready.
+5. Release Please creates a GitHub Release and tag.
+6. The `release.yml` workflow publishes the stable package to npm.
+7. Verify:
 
-   Smoke test:
+```bash
+npm view @boadij/pi-downshift version
+pi install npm:@boadij/pi-downshift
+```
 
-   ```text
-   /reload
-   /downshift
-   /downshift help
-   /downshift status
-   /downshift config
-   /downshift now
-   /downshift off
-   /downshift on
-   ```
+Stable releases must use tags like:
 
-5. Bump the version.
+```text
+v0.2.0
+v1.0.0
+```
 
-   ```bash
-   npm version patch
-   ```
+## Dev release flow
 
-   Use `minor` for meaningful feature additions and `major` for breaking changes after 1.0.
+Dev releases are manually triggered from GitHub Actions.
 
-6. Publish.
+1. Go to GitHub Actions.
+2. Run `dev-release`.
+3. Enter a prerelease version, for example:
 
-   ```bash
-   npm publish --access public
-   ```
+```text
+0.2.0-dev.0
+```
 
-7. Verify npm.
+4. Optionally enter notes.
+5. The workflow creates a GitHub prerelease and uploads a `.tgz` package asset.
+6. Do not publish dev releases to npm.
 
-   ```bash
-   npm view @boadij/pi-downshift version
-   ```
+Dev releases must use prerelease versions like:
 
-8. Verify install from npm.
+```text
+0.2.0-dev.0
+0.2.0-beta.1
+```
 
-   ```bash
-   pi install npm:@boadij/pi-downshift
-   ```
+## Local release checks
 
-## Versioning
+Run:
 
-Before 1.0:
+```bash
+npm run release:dry
+```
 
-- patch: bug fixes, docs, small polish
-- minor: new commands, changed defaults, meaningful behavior changes
-
-After 1.0:
-
-- patch: backward-compatible bug fixes
-- minor: backward-compatible features
-- major: breaking command, config, or behavior changes
+This runs typecheck, tests, and `npm pack --dry-run`.

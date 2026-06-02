@@ -1,0 +1,79 @@
+name: dev-release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Prerelease version, for example 0.2.0-dev.0"
+        required: true
+        type: string
+      notes:
+        description: "Optional extra release notes"
+        required: false
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  dev-release:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - run: npm ci
+
+      - name: Validate prerelease version
+        run: |
+          VERSION="${{ inputs.version }}"
+
+          if ! echo "$VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+-[0-9A-Za-z.-]+$'; then
+            echo "Version must be a semver prerelease like 0.2.0-dev.0"
+            exit 1
+          fi
+
+          if git ls-remote --tags origin "refs/tags/v$VERSION" | grep -q "refs/tags/v$VERSION"; then
+            echo "Tag v$VERSION already exists"
+            exit 1
+          fi
+
+      - name: Inject dev version for package asset
+        run: npm version "${{ inputs.version }}" --no-git-tag-version
+
+      - run: npm run check
+
+      - name: Pack dev tarball
+        run: |
+          mkdir -p dist
+          npm pack --pack-destination dist
+
+      - name: Create GitHub prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION="${{ inputs.version }}"
+          TAG="v$VERSION"
+
+          git tag "$TAG"
+          git push origin "$TAG"
+
+          NOTES="${{ inputs.notes }}"
+
+          if [ -n "$NOTES" ]; then
+            gh release create "$TAG" dist/*.tgz \
+              --prerelease \
+              --title "$TAG" \
+              --generate-notes \
+              --notes "$NOTES"
+          else
+            gh release create "$TAG" dist/*.tgz \
+              --prerelease \
+              --title "$TAG" \
+              --generate-notes
+          fi
