@@ -72,7 +72,7 @@ Run:
 /downshift config
 ```
 
-If no config exists yet, Downshift launches the guided setup using safe defaults for opt-in behavior and thresholds. After that, the command opens a small menu showing the current values so you can edit individual settings.
+If no config exists yet, Downshift launches the guided setup using safe defaults for opt-in behavior and thresholds. After that, the command opens a small menu showing the current values so you can edit individual settings. The config menu title includes the installed Downshift version.
 
 ## Commands ⌨️
 
@@ -82,11 +82,12 @@ If no config exists yet, Downshift launches the guided setup using safe defaults
 /downshift config
 /downshift on
 /downshift off
+/downshift help
 ```
 
 ### `/downshift status`
 
-Shows the current mode, context usage, remaining threshold budget, premium target, economy target, and last error if paused.
+Shows the current mode, context usage, remaining threshold budget, premium target, economy target, installed version, and last error if paused.
 
 ### `/downshift config`
 
@@ -105,6 +106,10 @@ Disables Downshift for the current session.
 ### `/downshift on`
 
 Re-enables Downshift for the current session.
+
+### `/downshift help`
+
+Shows the available Downshift commands and the installed version.
 
 ## Example config 🧩
 

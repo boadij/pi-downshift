@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { getSupportedThinkingLevels } from "@earendil-works/pi-ai";
@@ -30,6 +31,21 @@ import {
 
 const CONFIG_PATH = join(getAgentDir(), "downshift.json");
 const CUSTOM_TYPE = "downshift-state";
+
+function readPackageVersion(): string {
+  try {
+    const raw = readFileSync(
+      new URL("../package.json", import.meta.url),
+      "utf8",
+    );
+    const parsed = JSON.parse(raw) as { version?: unknown };
+    return typeof parsed.version === "string" ? parsed.version : "unknown";
+  } catch {
+    return "unknown";
+  }
+}
+
+const VERSION = readPackageVersion();
 
 type StateEntry = Partial<DownshiftState> & { version?: number };
 
@@ -472,7 +488,7 @@ async function configureMenu(
   let config = initial;
   while (true) {
     const selected = await ctx.ui.select(
-      "Downshift config",
+      `Downshift config v${VERSION}`,
       configMenuItems(config),
     );
     if (!selected) return;
@@ -617,11 +633,26 @@ async function showStatus(ctx: ExtensionCommandContext): Promise<void> {
     `handoff state: ${runtime.state.handoff}`,
     `upshift: ${config?.upshiftAfterCompaction ? "on" : "off"}`,
     `source: ${config?.premiumSource ?? "current"}`,
-    `commands: /downshift status | now | on | off | config`,
+    `version: ${VERSION}`,
+    `commands: /downshift status | now | config | on | off | help`,
   ];
   if (runtime.state.lastError)
     lines.push(`last error: ${runtime.state.lastError}`);
   ctx.ui.notify(lines.join("\n"), "info");
+}
+
+function usageText(): string {
+  return [
+    `Downshift v${VERSION}`,
+    "",
+    "/downshift - show status, or run setup if no config exists",
+    "/downshift status - show current mode, config, and version",
+    "/downshift now - handoff now and switch to economy",
+    "/downshift config - edit persistent config",
+    "/downshift on - enable Downshift for this session",
+    "/downshift off - disable Downshift for this session",
+    "/downshift help - show this help",
+  ].join("\n");
 }
 
 export default function downshift(pi: ExtensionAPI): void {
@@ -691,6 +722,10 @@ export default function downshift(pi: ExtensionAPI): void {
       }
       if (command === "config") return configure(ctx);
       if (command === "status") return showStatus(ctx);
+      if (command === "help") {
+        ctx.ui.notify(usageText(), "info");
+        return;
+      }
       if (command === "now") {
         await forceDownshiftNow(
           coreDeps(pi, ctx),
@@ -735,10 +770,7 @@ export default function downshift(pi: ExtensionAPI): void {
         ctx.ui.notify("downshift on for this session", "info");
         return;
       }
-      ctx.ui.notify(
-        "Usage: /downshift status | now | on | off | config",
-        "warning",
-      );
+      ctx.ui.notify(usageText(), "warning");
     },
   });
 }

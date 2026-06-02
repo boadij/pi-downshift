@@ -32,6 +32,7 @@
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
     "check": "npm run typecheck && npm test",
+    "release:dry": "npm run check && npm pack --dry-run",
     "prepublishOnly": "npm run check"
   },
   "peerDependencies": {
