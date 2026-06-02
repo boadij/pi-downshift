@@ -1,4 +1,3 @@
-
 # 🕹️ Downshift
 
 A tiny Pi Coding Agent extension that switches from a premium model to an economy model when your context gets expensive.
@@ -9,7 +8,6 @@ It does one thing: **start strong, then downshift when context pressure crosses 
 <p align="center">
   <img src="banner.jpg" alt="Downshift preview: Start Premium. Finish Cheap.">
 </p>
-
 
 ## Why 💸
 
