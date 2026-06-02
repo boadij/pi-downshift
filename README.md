@@ -18,6 +18,8 @@ Downshift is built around a simple idea:
 The premium model creates the working context.
 The economy model continues from it.
 
+The idea is not only to save tokens. It is to front-load quality: the premium model establishes intent, direction, decisions, constraints, and working habits while the task is still uncertain. The economy model then inherits that context and continues the work at lower cost.
+
 ## Handoff note 📝
 
 When context pressure crosses the threshold, Downshift can ask the premium model to write a concise handoff note before switching to the economy model.
