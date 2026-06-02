@@ -197,6 +197,22 @@ Downshift is for a narrower case:
 
 That narrower scope makes Downshift easier to reason about, easier to configure, and less surprising during long coding sessions.
 
+## Changelog 🗒️
+
+Release notes are generated from Conventional Commits.
+
+See [GitHub Releases](https://github.com/boadij/pi-downshift/releases) or [CHANGELOG.md](https://github.com/boadij/pi-downshift/blob/main/CHANGELOG.md).
+
+## Release channels 🚦
+
+Stable releases are published to npm and can be installed with:
+
+```bash
+pi install npm:@boadij/pi-downshift
+```
+
+Development builds are tested locally with `pi -e .`, `pi install .`, or a local packed tarball before publishing.
+
 ## Local development 🛠️
 
 Run the checks:
