@@ -5,6 +5,8 @@ A tiny Pi Coding Agent extension that switches from a premium model to an econom
 Downshift is not a model router.
 It does one thing: **start strong, then downshift when context pressure crosses a threshold.**
 
+**Subagents can be useful, but they often pay a context tax.** Downshift takes the opposite path: preserve the working context, then make continuation cheaper.
+
 <p align="center">
   <img src="banner.jpg" alt="Downshift preview: Start Premium. Finish Cheap.">
 </p>
@@ -127,11 +129,16 @@ Downshift stores its config in Pi's agent directory as `downshift.json`.
     "percent": 50
   },
   "economy": {
-    "provider": "openai",
-    "model": "gpt-5.4-nano",
-    "thinkingLevel": "off"
+    "provider": "openai-codex",
+    "model": "gpt-5.4-mini",
+    "thinkingLevel": "high"
   },
-  "premiumSource": "current",
+  "premiumSource": "explicit",
+  "premium": {
+    "provider": "openai-codex",
+    "model": "gpt-5.5",
+    "thinkingLevel": "medium"
+  },
   "startOnPremium": true,
   "upshiftAfterCompaction": false,
   "handoffBeforeDownshift": true
@@ -149,6 +156,25 @@ A coding session often has two phases:
    The plan is visible in the context. The relevant files, constraints, and next steps are already known. Economy models can often continue effectively at lower cost.
 
 Downshift automates that handoff with a threshold.
+
+## Downshift vs subagents 🧵
+
+Subagents split work across more conversations. Downshift keeps one conversation moving and changes the model that continues it.
+
+Subagents are useful when parallelism, specialization, or independent review matters. But they also introduce a context tax: each worker needs enough project state to act safely, which can mean re-reading files, rediscovering assumptions, and merging summaries back into the main thread.
+
+For small to medium coding tasks, that coordination overhead can cost more than it saves.
+
+Downshift makes a different bet:
+
+> Keep the working context. Lower the cost of continuing.
+
+The premium model handles orientation, discovery, planning, and architectural judgment. The economy model continues from the accumulated conversation and optional handoff note, without reconstructing the task from scratch.
+
+Downshift is not anti-subagent. It is anti-unnecessary-context-reconstruction.
+
+Use subagents when parallelism matters.
+Use Downshift when continuity and cost efficiency matter.
 
 ## Prompt caching 💾
 
