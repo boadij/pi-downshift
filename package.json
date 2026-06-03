@@ -27,7 +27,7 @@
   ],
   "pi": {
     "extensions": [
-      "./src/downshift.ts"
+      "./index.ts"
     ],
     "image": "https://raw.githubusercontent.com/boadij/pi-downshift/main/banner.jpg"
   },
