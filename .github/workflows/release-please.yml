@@ -6,11 +6,6 @@ on:
   push:
     branches:
       - main
-    paths:
-      - package.json
-      - package-lock.json
-      - CHANGELOG.md
-      - .release-please-manifest.json
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
