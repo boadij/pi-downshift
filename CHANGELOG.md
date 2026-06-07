@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.2.6](https://github.com/boadij/pi-downshift/compare/v0.2.5...v0.2.6) (2026-06-07)
+
+
+### Code Refactoring
+
+* extract functions and map lookups to clean up downshift extension code ([813507d](https://github.com/boadij/pi-downshift/commit/813507d5085d78899c2301b40ca2f52c8609b84f))
+* extract helper functions and state builders in downshift core and main entrypoint ([17bc5a1](https://github.com/boadij/pi-downshift/commit/17bc5a17a41b9b84b5f461080781382a7cb9ba26))
+
+
+### Build System
+
+* configure release-please changelog sections ([eddb178](https://github.com/boadij/pi-downshift/commit/eddb17851b86cdcbe7d0725cc78541ebc7e5ae1c))
+* update package-lock.json dependencies ([4021f70](https://github.com/boadij/pi-downshift/commit/4021f70808d73b06834a4aa53f2e84bb2df4cc21))
+
+
+### Tests
+
+* **core:** add tests for upshifting and status formatting ([570fcd2](https://github.com/boadij/pi-downshift/commit/570fcd29769f92ce3100349ab414e22844cfd8fb))
+
 ## [0.2.5](https://github.com/boadij/pi-downshift/compare/v0.2.4...v0.2.5) (2026-06-03)
 
 
