@@ -546,7 +546,7 @@ async function configureMenu(
   let config = initial;
   while (true) {
     const selected = await ctx.ui.select(
-      `Downshift config v${VERSION}`,
+      `⇣ Downshift v${VERSION}`,
       configMenuItems(config),
     );
     if (!selected) return;
