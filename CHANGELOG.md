@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.7](https://github.com/boadij/pi-downshift/compare/v0.2.6...v0.2.7) (2026-06-07)
+
+
+### Build System
+
+* update package-lock.json dependencies ([c6e21a5](https://github.com/boadij/pi-downshift/commit/c6e21a514dd7aa6eb2519350d37c8224077f06ae))
+
 ## [0.2.6](https://github.com/boadij/pi-downshift/compare/v0.2.5...v0.2.6) (2026-06-07)
 
 
