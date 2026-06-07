@@ -79,6 +79,15 @@ const ctx = {
 describe("downshift core", () => {
   beforeEach(() => vi.clearAllMocks());
 
+  function expectPendingHandoff(
+    runtime: { state: ReturnType<typeof createState> },
+    continueAfterHandoff: boolean,
+  ): void {
+    expect(runtime.state.handoff).toBe("requested");
+    expect(runtime.state.position).toBe("premium");
+    expect(runtime.state.continueAfterHandoff).toBe(continueAfterHandoff);
+  }
+
   it("separates remaining token and percent thresholds with a pipe", () => {
     expect(
       statusText(
@@ -95,9 +104,7 @@ describe("downshift core", () => {
 
     await maybeDownshift(deps, runtime, ctx, "steer");
 
-    expect(runtime.state.handoff).toBe("requested");
-    expect(runtime.state.position).toBe("premium");
-    expect(runtime.state.continueAfterHandoff).toBe(true);
+    expectPendingHandoff(runtime, true);
     expect(deps.sendUserMessage).toHaveBeenCalledOnce();
     const prompt = deps.sendUserMessage.mock.calls[0][0];
     expect(prompt).toContain(HANDOFF_MARKER);
@@ -139,9 +146,7 @@ describe("downshift core", () => {
 
     await forceDownshiftNow(deps, runtime, "steer");
 
-    expect(runtime.state.handoff).toBe("requested");
-    expect(runtime.state.position).toBe("premium");
-    expect(runtime.state.continueAfterHandoff).toBe(true);
+    expectPendingHandoff(runtime, true);
     expect(deps.sendUserMessage).toHaveBeenCalledWith(expect.any(String), {
       deliverAs: "steer",
     });

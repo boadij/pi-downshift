@@ -41,6 +41,12 @@ export type ContextUsageLike = {
 
 type StateEntry = Partial<DownshiftState> & { version?: number };
 
+type PersistedStateEntry = {
+  type?: string;
+  customType?: string;
+  data?: unknown;
+};
+
 export type Runtime = { state: DownshiftState };
 
 export type HandoffDelivery = "immediate" | "steer";
@@ -81,7 +87,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function parseTarget(value: unknown): ModelTarget | undefined {
+export function parseTarget(value: unknown): ModelTarget | undefined {
   if (!isRecord(value)) return undefined;
   if (typeof value.provider !== "string" || !value.provider) return undefined;
   if (typeof value.model !== "string" || !value.model) return undefined;
@@ -95,37 +101,44 @@ function parseTarget(value: unknown): ModelTarget | undefined {
 }
 
 export function restoreStateFromEntries(
-  entries: Array<{ type?: string; customType?: string; data?: unknown }>,
+  entries: PersistedStateEntry[],
   sessionId: string,
 ): DownshiftState | undefined {
   for (let index = entries.length - 1; index >= 0; index -= 1) {
-    const entry = entries[index];
-    if (
-      entry.type !== "custom" ||
-      entry.customType !== "downshift-state" ||
-      !isRecord(entry.data)
-    )
-      continue;
-    const data = entry.data as StateEntry;
-    const interrupted =
-      data.handoff === "requested" || data.handoff === "active";
-    return {
-      sessionId:
-        typeof data.sessionId === "string" ? data.sessionId : sessionId,
-      sessionEnabled: data.sessionEnabled !== false,
-      paused: interrupted || data.paused === true,
-      position: data.position === "economy" ? "economy" : "premium",
-      handoff: data.handoff === "done" ? "done" : "idle",
-      continueAfterHandoff: false,
-      capturedPremium: parseTarget(data.capturedPremium),
-      lastError: interrupted
-        ? "handoff interrupted by reload"
-        : typeof data.lastError === "string"
-          ? data.lastError
-          : undefined,
-    };
+    const data = parseStateEntry(entries[index]);
+    if (data) return restoredState(data, sessionId);
   }
   return undefined;
+}
+
+function parseStateEntry(entry: PersistedStateEntry): StateEntry | undefined {
+  return entry.type === "custom" &&
+    entry.customType === "downshift-state" &&
+    isRecord(entry.data)
+    ? (entry.data as StateEntry)
+    : undefined;
+}
+
+function restoredState(data: StateEntry, sessionId: string): DownshiftState {
+  const interrupted = data.handoff === "requested" || data.handoff === "active";
+  return {
+    sessionId: typeof data.sessionId === "string" ? data.sessionId : sessionId,
+    sessionEnabled: data.sessionEnabled !== false,
+    paused: interrupted || data.paused === true,
+    position: data.position === "economy" ? "economy" : "premium",
+    handoff: data.handoff === "done" ? "done" : "idle",
+    continueAfterHandoff: false,
+    capturedPremium: parseTarget(data.capturedPremium),
+    lastError: restoredLastError(data, interrupted),
+  };
+}
+
+function restoredLastError(
+  data: StateEntry,
+  interrupted: boolean,
+): string | undefined {
+  if (interrupted) return "handoff interrupted by reload";
+  return typeof data.lastError === "string" ? data.lastError : undefined;
 }
 
 export function thresholdReached(
@@ -148,7 +161,7 @@ export function thresholdReached(
   return false;
 }
 
-export function belowThreshold(
+function belowThreshold(
   usage: ContextUsageLike | undefined,
   threshold: Threshold,
 ): boolean {
@@ -166,7 +179,7 @@ export function belowThreshold(
   return true;
 }
 
-function formatCompactNumber(value: number): string {
+export function formatCompactNumber(value: number): string {
   const absolute = Math.abs(value);
   if (absolute >= 1_000_000) return `${Math.round(value / 1_000_000)}m`;
   if (absolute >= 1_000) return `${Math.round(value / 1_000)}k`;
@@ -230,7 +243,7 @@ Do not restate the plan unless needed.
 Pick up with the next concrete step and continue execution.`;
 }
 
-export async function requestHandoff(
+async function requestHandoff(
   deps: CoreDeps,
   runtime: Runtime,
   delivery: HandoffDelivery,
@@ -299,23 +312,13 @@ export async function forceDownshiftNow(
   return requestHandoff(deps, runtime, delivery, config);
 }
 
-export async function completeHandoffAndSwitch(
+async function completeHandoffAndSwitch(
   deps: CoreDeps,
   runtime: Runtime,
 ): Promise<DownshiftState> {
   const config = await deps.readConfig();
-  if (
-    !config?.enabled ||
-    !runtime.state.sessionEnabled ||
-    runtime.state.paused ||
-    runtime.state.position === "economy"
-  ) {
-    if (!runtime.state.paused && runtime.state.position !== "economy") {
-      setState(deps, runtime, {
-        handoff: "idle",
-        continueAfterHandoff: false,
-      });
-    }
+  if (!canCompleteHandoff(config, runtime.state)) {
+    clearPendingHandoffIfNeeded(deps, runtime);
     deps.updateStatus(config);
     return runtime.state;
   }
@@ -331,24 +334,46 @@ export async function completeHandoffAndSwitch(
   );
   if (switched) {
     setState(deps, runtime, { position: "economy", lastError: undefined });
-    if (shouldContinue) {
-      try {
-        await deps.sendUserMessage(buildContinuePrompt(), {
-          deliverAs: "followUp",
-        });
-        deps.notify("downshift: continuing on economy", "info");
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        setState(deps, runtime, {
-          paused: true,
-          lastError: `continue failed: ${message}`,
-        });
-        deps.notify(`downshift paused: continue failed: ${message}`, "error");
-      }
-    }
+    if (shouldContinue) await continueOnEconomy(deps, runtime);
   }
   deps.updateStatus(config);
   return runtime.state;
+}
+
+function canCompleteHandoff(
+  config: DownshiftConfig | undefined,
+  state: DownshiftState,
+): config is DownshiftConfig {
+  return (
+    !!config?.enabled &&
+    state.sessionEnabled &&
+    !state.paused &&
+    state.position !== "economy"
+  );
+}
+
+function clearPendingHandoffIfNeeded(deps: CoreDeps, runtime: Runtime): void {
+  if (runtime.state.paused || runtime.state.position === "economy") return;
+  setState(deps, runtime, { handoff: "idle", continueAfterHandoff: false });
+}
+
+async function continueOnEconomy(
+  deps: CoreDeps,
+  runtime: Runtime,
+): Promise<void> {
+  try {
+    await deps.sendUserMessage(buildContinuePrompt(), {
+      deliverAs: "followUp",
+    });
+    deps.notify("downshift: continuing on economy", "info");
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    setState(deps, runtime, {
+      paused: true,
+      lastError: `continue failed: ${message}`,
+    });
+    deps.notify(`downshift paused: continue failed: ${message}`, "error");
+  }
 }
 
 export async function maybeDownshift(
