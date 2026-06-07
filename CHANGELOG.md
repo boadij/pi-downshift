@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.9](https://github.com/boadij/pi-downshift/compare/v0.2.8...v0.2.9) (2026-06-07)
+
+
+### Code Refactoring
+
+* **downshift:** remove done option from configuration menu ([15e8bd5](https://github.com/boadij/pi-downshift/commit/15e8bd52c9f17c1de92747aa26a350b1f19a7b04))
+
 ## [0.2.8](https://github.com/boadij/pi-downshift/compare/v0.2.7...v0.2.8) (2026-06-07)
 
 
