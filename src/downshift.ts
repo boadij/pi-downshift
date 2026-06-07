@@ -750,10 +750,9 @@ function usageText(): string {
   return [
     `Downshift v${VERSION}`,
     "",
-    "/downshift - show status, or run setup if no config exists",
+    "/downshift - configure Downshift",
     "/downshift status - show current mode, config, and version",
     "/downshift now - handoff now and switch to economy",
-    "/downshift config - edit persistent config",
     "/downshift on - enable Downshift for this session",
     "/downshift off - disable Downshift for this session",
     "/downshift help - show this help",
@@ -766,7 +765,6 @@ async function runDownshiftCommand(
   command: string,
 ): Promise<void> {
   const actions: Record<string, () => Promise<void> | void> = {
-    config: () => configure(ctx),
     status: () => showStatus(ctx),
     help: () => ctx.ui.notify(usageText(), "info"),
     now: () => downshiftNow(pi, ctx),
@@ -948,10 +946,7 @@ export default function downshift(pi: ExtensionAPI): void {
     description: "Configure automatic model downshifting by context threshold",
     handler: async (args, ctx) => {
       const command = args.trim();
-      if (!command) {
-        const config = await readConfig();
-        return config ? showStatus(ctx) : configureInitial(ctx);
-      }
+      if (!command) return configure(ctx);
       await runDownshiftCommand(pi, ctx, command);
     },
   });

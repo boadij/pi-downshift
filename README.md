@@ -77,7 +77,7 @@ Then reload Pi:
 Run:
 
 ```text
-/downshift config
+/downshift
 ```
 
 If no config exists yet, Downshift launches the guided setup using safe defaults for opt-in behavior and thresholds. After that, the command opens a small menu showing the current values so you can edit individual settings. The config menu title includes the installed Downshift version.
@@ -85,21 +85,21 @@ If no config exists yet, Downshift launches the guided setup using safe defaults
 ## Commands ⌨️
 
 ```text
+/downshift
 /downshift status
 /downshift now
-/downshift config
 /downshift on
 /downshift off
 /downshift help
 ```
 
+### `/downshift`
+
+Opens the interactive config menu. Existing configs can be edited one setting at a time without reselecting everything. On first setup, Downshift runs a guided setup flow.
+
 ### `/downshift status`
 
 Shows the current mode, context usage, remaining threshold budget, premium target, economy target, installed version, and last error if paused.
-
-### `/downshift config`
-
-Opens the interactive config menu. Existing configs can be edited one setting at a time without reselecting everything. On first setup, Downshift runs a guided setup flow.
 
 ### `/downshift now`
 
