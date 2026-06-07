@@ -424,38 +424,59 @@ export async function maybeUpshift(
 ): Promise<DownshiftState> {
   const config = await deps.readConfig();
   deps.updateStatus(config);
-  if (
-    !config?.enabled ||
-    !config.upshiftAfterCompaction ||
-    !runtime.state.sessionEnabled ||
-    runtime.state.paused ||
-    runtime.state.position !== "economy" ||
-    !belowThreshold(ctx.getContextUsage(), config.threshold)
-  )
+  if (!canUpshift(config, runtime.state, ctx.getContextUsage()))
     return runtime.state;
-  const premium =
-    config.premiumSource === "explicit"
-      ? config.premium
-      : runtime.state.capturedPremium;
+  const premium = resolvePremium(config, runtime.state);
   if (!premium) {
-    setState(deps, runtime, {
-      paused: true,
-      continueAfterHandoff: false,
-      lastError: "premium target is unset",
-    });
-    deps.notify("downshift paused: premium target is unset", "error");
+    pauseForMissingPremium(deps, runtime);
     return runtime.state;
   }
   const switched = await deps.switchToTarget(premium, "premium", "upshifted");
-  if (switched)
-    setState(deps, runtime, {
-      position: "premium",
-      handoff: "idle",
-      continueAfterHandoff: false,
-      lastError: undefined,
-    });
+  if (switched) setUpshifted(deps, runtime);
   deps.updateStatus(config);
   return runtime.state;
+}
+
+function canUpshift(
+  config: DownshiftConfig | undefined,
+  state: DownshiftState,
+  usage: ContextUsageLike | undefined,
+): config is DownshiftConfig {
+  return (
+    !!config?.enabled &&
+    config.upshiftAfterCompaction &&
+    state.sessionEnabled &&
+    !state.paused &&
+    state.position === "economy" &&
+    belowThreshold(usage, config.threshold)
+  );
+}
+
+function resolvePremium(
+  config: DownshiftConfig,
+  state: DownshiftState,
+): ModelTarget | undefined {
+  return config.premiumSource === "explicit"
+    ? config.premium
+    : state.capturedPremium;
+}
+
+function pauseForMissingPremium(deps: CoreDeps, runtime: Runtime): void {
+  setState(deps, runtime, {
+    paused: true,
+    continueAfterHandoff: false,
+    lastError: "premium target is unset",
+  });
+  deps.notify("downshift paused: premium target is unset", "error");
+}
+
+function setUpshifted(deps: CoreDeps, runtime: Runtime): void {
+  setState(deps, runtime, {
+    position: "premium",
+    handoff: "idle",
+    continueAfterHandoff: false,
+    lastError: undefined,
+  });
 }
 
 export async function handleBeforeAgentStart(

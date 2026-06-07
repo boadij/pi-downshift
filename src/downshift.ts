@@ -89,6 +89,11 @@ const BOOLEAN_FIELD_PROMPTS: Record<
   handoffBeforeDownshift: "Create handoff note before downshifting?",
 };
 
+type ConfigFieldEditor = (
+  ctx: ExtensionCommandContext,
+  config: DownshiftConfig,
+) => Promise<DownshiftConfig | undefined>;
+
 let runtime: Runtime = { state: createInitialState() };
 let internalModelChange = false;
 
@@ -398,22 +403,12 @@ async function selectPremium(
   ctx: ExtensionCommandContext,
   previous?: DownshiftConfig,
 ): Promise<Pick<DownshiftConfig, "premiumSource" | "premium"> | undefined> {
-  const currentLabel =
-    previous?.premiumSource === "explicit"
-      ? "explicit premium model"
-      : "current session model";
   const premiumMode = await ctx.ui.select(
-    previous ? `Premium source (current: ${currentLabel})` : "Premium source",
-    [
-      currentLabel,
-      ...["current session model", "explicit premium model"].filter(
-        (item) => item !== currentLabel,
-      ),
-    ],
+    premiumSourcePrompt(previous),
+    orderedPremiumSourceOptions(previous),
   );
   if (!premiumMode) return undefined;
-  const premiumSource =
-    premiumMode === "explicit premium model" ? "explicit" : "current";
+  const premiumSource = premiumSourceFromLabel(premiumMode);
   if (premiumSource === "current") {
     return { premiumSource, premium: previous?.premium };
   }
@@ -423,6 +418,27 @@ async function selectPremium(
     previous?.premium,
   );
   return premium ? { premiumSource, premium } : undefined;
+}
+
+function premiumSourcePrompt(previous?: DownshiftConfig): string {
+  const current = premiumSourceOptionLabel(previous);
+  return previous ? `Premium source (current: ${current})` : "Premium source";
+}
+
+function orderedPremiumSourceOptions(previous?: DownshiftConfig): string[] {
+  const current = premiumSourceOptionLabel(previous);
+  const options = ["current session model", "explicit premium model"];
+  return [current, ...options.filter((item) => item !== current)];
+}
+
+function premiumSourceOptionLabel(previous?: DownshiftConfig): string {
+  return previous?.premiumSource === "explicit"
+    ? "explicit premium model"
+    : "current session model";
+}
+
+function premiumSourceFromLabel(label: string): "current" | "explicit" {
+  return label === "explicit premium model" ? "explicit" : "current";
 }
 
 async function editThreshold(
@@ -453,15 +469,33 @@ async function promptThresholdValue(
 ): Promise<number | undefined> {
   const value = await promptNumber(
     ctx,
-    kind === "tokens" ? "Token threshold" : "Percent threshold",
-    previous[kind]?.toString() ?? (kind === "tokens" ? "100000" : "60"),
+    thresholdValueTitle(kind),
+    thresholdValuePlaceholder(kind, previous),
   );
   if (!value) ctx.ui.notify(`Invalid ${kind} threshold`, "error");
-  if (kind === "percent" && value && value > 100) {
+  if (invalidPercentThreshold(kind, value)) {
     ctx.ui.notify("Percent threshold must be 100 or less", "error");
     return undefined;
   }
   return value;
+}
+
+function thresholdValueTitle(kind: "tokens" | "percent"): string {
+  return kind === "tokens" ? "Token threshold" : "Percent threshold";
+}
+
+function thresholdValuePlaceholder(
+  kind: "tokens" | "percent",
+  previous: Threshold,
+): string {
+  return previous[kind]?.toString() ?? (kind === "tokens" ? "100000" : "60");
+}
+
+function invalidPercentThreshold(
+  kind: "tokens" | "percent",
+  value: number | undefined,
+): boolean {
+  return kind === "percent" && value !== undefined && value > 100;
 }
 
 async function buildThreshold(
@@ -541,31 +575,48 @@ async function editConfigField(
   config: DownshiftConfig,
   field: ConfigField,
 ): Promise<DownshiftConfig | undefined> {
-  if (field in BOOLEAN_FIELD_PROMPTS) {
-    return editBooleanConfigField(
-      ctx,
-      config,
-      field as keyof typeof BOOLEAN_FIELD_PROMPTS,
-    );
-  }
-  switch (field) {
-    case "threshold": {
-      const threshold = await editThreshold(ctx, config.threshold);
-      return threshold ? { ...config, threshold } : undefined;
-    }
-    case "economy": {
-      const economy = await selectTarget(
-        ctx,
-        "Select economy model",
-        config.economy,
-      );
-      return economy ? { ...config, economy } : undefined;
-    }
-    case "premium": {
-      const premiumConfig = await selectPremium(ctx, config);
-      return premiumConfig ? { ...config, ...premiumConfig } : undefined;
-    }
-  }
+  return CONFIG_FIELD_EDITORS[field](ctx, config);
+}
+
+const CONFIG_FIELD_EDITORS: Record<ConfigField, ConfigFieldEditor> = {
+  enabled: (ctx, config) => editBooleanConfigField(ctx, config, "enabled"),
+  threshold: editThresholdConfigField,
+  economy: editEconomyConfigField,
+  premium: editPremiumConfigField,
+  startOnPremium: (ctx, config) =>
+    editBooleanConfigField(ctx, config, "startOnPremium"),
+  upshiftAfterCompaction: (ctx, config) =>
+    editBooleanConfigField(ctx, config, "upshiftAfterCompaction"),
+  handoffBeforeDownshift: (ctx, config) =>
+    editBooleanConfigField(ctx, config, "handoffBeforeDownshift"),
+};
+
+async function editThresholdConfigField(
+  ctx: ExtensionCommandContext,
+  config: DownshiftConfig,
+): Promise<DownshiftConfig | undefined> {
+  const threshold = await editThreshold(ctx, config.threshold);
+  return threshold ? { ...config, threshold } : undefined;
+}
+
+async function editEconomyConfigField(
+  ctx: ExtensionCommandContext,
+  config: DownshiftConfig,
+): Promise<DownshiftConfig | undefined> {
+  const economy = await selectTarget(
+    ctx,
+    "Select economy model",
+    config.economy,
+  );
+  return economy ? { ...config, economy } : undefined;
+}
+
+async function editPremiumConfigField(
+  ctx: ExtensionCommandContext,
+  config: DownshiftConfig,
+): Promise<DownshiftConfig | undefined> {
+  const premiumConfig = await selectPremium(ctx, config);
+  return premiumConfig ? { ...config, ...premiumConfig } : undefined;
 }
 
 async function editBooleanConfigField(
@@ -602,49 +653,93 @@ function formatRemaining(
   threshold: Threshold,
 ): string {
   if (!usage) return "unknown";
-  const parts: string[] = [];
-  if (threshold.tokens !== undefined) {
-    if (usage.tokens === null) {
-      parts.push(`?/${threshold.tokens.toLocaleString("en-US")}`);
-    } else {
-      parts.push(
-        `${formatCompactNumber(Math.max(0, threshold.tokens - usage.tokens))} left`,
-      );
-    }
-  }
-  if (threshold.percent !== undefined) {
-    if (usage.percent === null) {
-      parts.push(`?/${threshold.percent}%`);
-    } else {
-      parts.push(
-        `${Math.max(0, Math.round(threshold.percent - usage.percent))}% left`,
-      );
-    }
-  }
+  const parts = [
+    remainingTokens(usage.tokens, threshold.tokens),
+    remainingPercent(usage.percent, threshold.percent),
+  ].filter((part) => part !== undefined);
   return parts.length > 0 ? parts.join(" / ") : "unknown";
+}
+
+function remainingTokens(
+  usageTokens: number | null,
+  thresholdTokens: number | undefined,
+): string | undefined {
+  if (thresholdTokens === undefined) return undefined;
+  if (usageTokens === null)
+    return `?/${thresholdTokens.toLocaleString("en-US")}`;
+  return `${formatCompactNumber(Math.max(0, thresholdTokens - usageTokens))} left`;
+}
+
+function remainingPercent(
+  usagePercent: number | null,
+  thresholdPercent: number | undefined,
+): string | undefined {
+  if (thresholdPercent === undefined) return undefined;
+  if (usagePercent === null) return `?/${thresholdPercent}%`;
+  return `${Math.max(0, Math.round(thresholdPercent - usagePercent))}% left`;
 }
 
 async function showStatus(ctx: ExtensionCommandContext): Promise<void> {
   const config = await readConfig();
-  const usage = ctx.getContextUsage();
-  const threshold = config?.threshold;
-  const lines = [
-    `mode: ${statusText(config, runtime.state, usage)}`,
-    `usage: ${formatUsage(usage)}`,
-    `remaining: ${threshold ? formatRemaining(usage, threshold) : "unset"}`,
-    `threshold: ${threshold ? formatThreshold(threshold) : "unset"}`,
-    `premium: ${targetLabel(config && resolvePremiumTarget(config))}`,
-    `economy: ${targetLabel(config?.economy)}`,
-    `handoff: ${yesNoMode(config?.handoffBeforeDownshift, "auto")}`,
-    `handoff state: ${runtime.state.handoff}`,
-    `upshift: ${yesNoMode(config?.upshiftAfterCompaction, "on")}`,
-    `source: ${config?.premiumSource ?? "current"}`,
-    `version: ${VERSION}`,
-    `commands: /downshift status | now | config | on | off | help`,
-  ];
-  if (runtime.state.lastError)
-    lines.push(`last error: ${runtime.state.lastError}`);
+  const lines = buildStatusLines(config, runtime.state, ctx.getContextUsage());
   ctx.ui.notify(lines.join("\n"), "info");
+}
+
+function buildStatusLines(
+  config: DownshiftConfig | undefined,
+  state: DownshiftState,
+  usage: ContextUsage | undefined,
+): string[] {
+  const lines = baseStatusLines(config, state, usage);
+  if (state.lastError) lines.push(`last error: ${state.lastError}`);
+  return lines;
+}
+
+function baseStatusLines(
+  config: DownshiftConfig | undefined,
+  state: DownshiftState,
+  usage: ContextUsage | undefined,
+): string[] {
+  return STATUS_LINE_BUILDERS.map((build) => build(config, state, usage));
+}
+
+const STATUS_LINE_BUILDERS: Array<
+  (
+    config: DownshiftConfig | undefined,
+    state: DownshiftState,
+    usage: ContextUsage | undefined,
+  ) => string
+> = [
+  (config, state, usage) => `mode: ${statusText(config, state, usage)}`,
+  (_config, _state, usage) => `usage: ${formatUsage(usage)}`,
+  (config, _state, usage) =>
+    `remaining: ${formatOptionalRemaining(usage, config?.threshold)}`,
+  (config) => `threshold: ${formatOptionalThreshold(config?.threshold)}`,
+  (config) => `premium: ${targetLabel(resolveOptionalPremiumTarget(config))}`,
+  (config) => `economy: ${targetLabel(config?.economy)}`,
+  (config) => `handoff: ${yesNoMode(config?.handoffBeforeDownshift, "auto")}`,
+  (_config, state) => `handoff state: ${state.handoff}`,
+  (config) => `upshift: ${yesNoMode(config?.upshiftAfterCompaction, "on")}`,
+  (config) => `source: ${config?.premiumSource ?? "current"}`,
+  () => `version: ${VERSION}`,
+  () => `commands: /downshift status | now | config | on | off | help`,
+];
+
+function formatOptionalRemaining(
+  usage: ContextUsage | undefined,
+  threshold: Threshold | undefined,
+): string {
+  return threshold ? formatRemaining(usage, threshold) : "unset";
+}
+
+function formatOptionalThreshold(threshold: Threshold | undefined): string {
+  return threshold ? formatThreshold(threshold) : "unset";
+}
+
+function resolveOptionalPremiumTarget(
+  config: DownshiftConfig | undefined,
+): ModelTarget | undefined {
+  return config ? resolvePremiumTarget(config) : undefined;
 }
 
 function yesNoMode(value: boolean | undefined, yes: string): string {
@@ -700,30 +795,28 @@ async function setSessionEnabled(
   ctx: ExtensionCommandContext,
   enabled: boolean,
 ): Promise<void> {
-  if (!enabled) {
-    saveState(pi, {
-      sessionEnabled: false,
-      handoff: "idle",
-      continueAfterHandoff: false,
-    });
-    updateStatus(ctx, await readConfig());
-    ctx.ui.notify("downshift off for this session", "info");
-    return;
-  }
-  const config = await readConfig();
-  const current = getCurrentTarget(ctx);
+  return enabled ? enableSession(pi, ctx) : disableSession(pi, ctx);
+}
+
+async function disableSession(
+  pi: ExtensionAPI,
+  ctx: ExtensionCommandContext,
+): Promise<void> {
   saveState(pi, {
-    sessionEnabled: true,
-    paused: false,
-    position: "premium",
-    lastError: undefined,
+    sessionEnabled: false,
     handoff: "idle",
     continueAfterHandoff: false,
-    capturedPremium:
-      config?.premiumSource === "current" && current
-        ? { ...current, thinkingLevel: pi.getThinkingLevel() }
-        : runtime.state.capturedPremium,
   });
+  updateStatus(ctx, await readConfig());
+  ctx.ui.notify("downshift off for this session", "info");
+}
+
+async function enableSession(
+  pi: ExtensionAPI,
+  ctx: ExtensionCommandContext,
+): Promise<void> {
+  const config = await readConfig();
+  saveState(pi, enabledSessionState(pi, ctx, config));
   await maybeDownshift(
     coreDeps(pi, ctx),
     runtime,
@@ -734,35 +827,95 @@ async function setSessionEnabled(
   ctx.ui.notify("downshift on for this session", "info");
 }
 
+function enabledSessionState(
+  pi: ExtensionAPI,
+  ctx: ExtensionCommandContext,
+  config: DownshiftConfig | undefined,
+): Partial<DownshiftState> {
+  return {
+    sessionEnabled: true,
+    paused: false,
+    position: "premium",
+    lastError: undefined,
+    handoff: "idle",
+    continueAfterHandoff: false,
+    capturedPremium: capturedPremiumForEnable(pi, ctx, config),
+  };
+}
+
+function capturedPremiumForEnable(
+  pi: ExtensionAPI,
+  ctx: ExtensionCommandContext,
+  config: DownshiftConfig | undefined,
+): ModelTarget | undefined {
+  const current = getCurrentTarget(ctx);
+  if (config?.premiumSource !== "current" || !current)
+    return runtime.state.capturedPremium;
+  return { ...current, thinkingLevel: pi.getThinkingLevel() };
+}
+
+async function handleSessionStart(
+  pi: ExtensionAPI,
+  event: { reason?: string },
+  ctx: ExtensionContext,
+): Promise<void> {
+  const hadState = restoreState(ctx);
+  const config = await readConfig();
+  if (!hadState) await initializeSessionState(pi, event, ctx, config);
+  updateStatus(ctx, config);
+}
+
+async function initializeSessionState(
+  pi: ExtensionAPI,
+  event: { reason?: string },
+  ctx: ExtensionContext,
+  config: DownshiftConfig | undefined,
+): Promise<void> {
+  const current = getCurrentTarget(ctx);
+  runtime.state = initialSessionState(ctx, current, pi.getThinkingLevel());
+  saveState(pi);
+  if (shouldStartOnPremium(config, event, ctx)) {
+    await switchToTarget(pi, ctx, config.premium, "premium", "started");
+  }
+}
+
+function initialSessionState(
+  ctx: ExtensionContext,
+  current: ModelTarget | undefined,
+  thinkingLevel: string,
+): DownshiftState {
+  return {
+    sessionId: ctx.sessionManager.getSessionId(),
+    sessionEnabled: true,
+    paused: false,
+    position: "premium",
+    handoff: "idle",
+    continueAfterHandoff: false,
+    capturedPremium: current ? { ...current, thinkingLevel } : undefined,
+  };
+}
+
+function shouldStartOnPremium(
+  config: DownshiftConfig | undefined,
+  event: { reason?: string },
+  ctx: ExtensionContext,
+): config is DownshiftConfig & { premium: ModelTarget } {
+  return (
+    hasExplicitStartPremium(config) &&
+    event.reason !== "resume" &&
+    !thresholdReached(ctx.getContextUsage(), config.threshold)
+  );
+}
+
+function hasExplicitStartPremium(
+  config: DownshiftConfig | undefined,
+): config is DownshiftConfig & { premium: ModelTarget } {
+  return !!config?.enabled && config.startOnPremium && !!config.premium;
+}
+
 export default function downshift(pi: ExtensionAPI): void {
   pi.on("session_start", async (event, ctx) => {
-    const hadState = restoreState(ctx);
-    const config = await readConfig();
-    if (!hadState) {
-      const current = getCurrentTarget(ctx);
-      runtime.state = {
-        sessionId: ctx.sessionManager.getSessionId(),
-        sessionEnabled: true,
-        paused: false,
-        position: "premium",
-        handoff: "idle",
-        continueAfterHandoff: false,
-        capturedPremium: current
-          ? { ...current, thinkingLevel: pi.getThinkingLevel() }
-          : undefined,
-      };
-      saveState(pi);
-      if (
-        config?.enabled &&
-        config.startOnPremium &&
-        config.premium &&
-        event.reason !== "resume" &&
-        !thresholdReached(ctx.getContextUsage(), config.threshold)
-      ) {
-        await switchToTarget(pi, ctx, config.premium, "premium", "started");
-      }
-    }
-    updateStatus(ctx, config);
+    await handleSessionStart(pi, event, ctx);
   });
 
   pi.on("context", async (_event, ctx) => {
