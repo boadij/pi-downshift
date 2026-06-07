@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.2.10](https://github.com/boadij/pi-downshift/compare/v0.2.9...v0.2.10) (2026-06-07)
+
+
+### Miscellaneous Chores
+
+* **release-please:** configure style and revert commit types in changelog ([322f802](https://github.com/boadij/pi-downshift/commit/322f8029e42eddd6a872d1687e94d4978d5e80d9))
+
+
+### Code Style
+
+* **downshift:** update configuration menu header title ([600723b](https://github.com/boadij/pi-downshift/commit/600723bf079baadf5c653648a3b31b9a677a4ad6))
+
 ## [0.2.9](https://github.com/boadij/pi-downshift/compare/v0.2.8...v0.2.9) (2026-06-07)
 
 
