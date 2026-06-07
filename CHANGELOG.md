@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.8](https://github.com/boadij/pi-downshift/compare/v0.2.7...v0.2.8) (2026-06-07)
+
+
+### Code Refactoring
+
+* route default command to config and remove config subcommand ([bf61add](https://github.com/boadij/pi-downshift/commit/bf61addf612894b708b33807a9169b381f607e66))
+
 ## [0.2.7](https://github.com/boadij/pi-downshift/compare/v0.2.6...v0.2.7) (2026-06-07)
 
 
