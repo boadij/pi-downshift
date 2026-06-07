@@ -1,6 +1,6 @@
 {
   "name": "pi-downshift",
-  "version": "0.2.10",
+  "version": "0.2.11",
   "description": "A tiny Pi Coding Agent extension that switches from a premium model to an economy model when your context gets expensive.",
   "type": "module",
   "main": "index.ts",

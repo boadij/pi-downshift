@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.11](https://github.com/boadij/pi-downshift/compare/v0.2.10...v0.2.11) (2026-06-07)
+
+
+### Documentation
+
+* update product description and positioning in README ([106e2f1](https://github.com/boadij/pi-downshift/commit/106e2f171333e1f3702c67631b94598c23204767))
+
 ## [0.2.10](https://github.com/boadij/pi-downshift/compare/v0.2.9...v0.2.10) (2026-06-07)
 
 
