@@ -7,6 +7,7 @@ import {
   handleBeforeAgentStart,
   handleManualModelSelect,
   maybeDownshift,
+  maybeUpshift,
   restoreStateFromEntries,
   statusText,
   type DownshiftConfig,
@@ -18,6 +19,12 @@ const economy: ModelTarget = {
   provider: "test",
   model: "economy",
   thinkingLevel: "off",
+};
+
+const premium: ModelTarget = {
+  provider: "test",
+  model: "premium",
+  thinkingLevel: "medium",
 };
 
 const baseConfig: DownshiftConfig = {
@@ -88,6 +95,24 @@ describe("downshift core", () => {
     expect(runtime.state.continueAfterHandoff).toBe(continueAfterHandoff);
   }
 
+  function createUpshiftDeps(): TestDeps {
+    return createDeps({
+      ...baseConfig,
+      premiumSource: "explicit",
+      premium,
+      upshiftAfterCompaction: true,
+      threshold: { tokens: 1_000, percent: 50 },
+    });
+  }
+
+  function createEconomyRuntime() {
+    return { state: createState({ position: "economy" }) };
+  }
+
+  function createLowUsageContext() {
+    return { getContextUsage: () => ({ tokens: 500, percent: 20 }) };
+  }
+
   it("separates remaining token and percent thresholds with a pipe", () => {
     expect(
       statusText(
@@ -96,6 +121,47 @@ describe("downshift core", () => {
         { tokens: 58_000, percent: 32 },
       ),
     ).toBe("⇣ 42k | 18% → eco");
+  });
+
+  it("formats status for disabled, paused, handoff, economy, and unknown usage states", () => {
+    expect(
+      statusText(
+        { ...baseConfig, enabled: false },
+        createState(),
+        ctx.getContextUsage(),
+      ),
+    ).toBe("⇣ off");
+    expect(
+      statusText(
+        baseConfig,
+        createState({ paused: true }),
+        ctx.getContextUsage(),
+      ),
+    ).toBe("⇣ paused");
+    expect(
+      statusText(
+        baseConfig,
+        createState({ handoff: "requested" }),
+        ctx.getContextUsage(),
+      ),
+    ).toBe("⇣ handoff");
+    expect(
+      statusText(
+        baseConfig,
+        createState({ handoff: "active" }),
+        ctx.getContextUsage(),
+      ),
+    ).toBe("⇣ writing handoff");
+    expect(
+      statusText(
+        baseConfig,
+        createState({ position: "economy" }),
+        ctx.getContextUsage(),
+      ),
+    ).toBe("⇣ eco");
+    expect(
+      statusText(baseConfig, createState(), { tokens: null, percent: null }),
+    ).toBe("⇣ ? → eco");
   });
 
   it("queues a steering handoff when threshold is reached during agent work", async () => {
@@ -294,6 +360,53 @@ describe("downshift core", () => {
     expect(runtime.state.position).toBe("economy");
   });
 
+  it("upshifts when compaction drops usage below threshold", async () => {
+    const deps = createUpshiftDeps();
+    const runtime = createEconomyRuntime();
+    const lowUsage = createLowUsageContext();
+
+    await maybeUpshift(deps, runtime, lowUsage);
+
+    expect(deps.switchToTarget).toHaveBeenCalledWith(
+      premium,
+      "premium",
+      "upshifted",
+    );
+    expect(runtime.state.position).toBe("premium");
+    expect(runtime.state.handoff).toBe("idle");
+  });
+
+  it("does not upshift when usage is unknown or still above threshold", async () => {
+    const deps = createUpshiftDeps();
+    const runtime = { state: createState({ position: "economy" }) };
+
+    await maybeUpshift(deps, runtime, {
+      getContextUsage: () => ({ tokens: null, percent: 20 }),
+    });
+    await maybeUpshift(deps, runtime, {
+      getContextUsage: () => ({ tokens: 500, percent: 60 }),
+    });
+
+    expect(deps.switchToTarget).not.toHaveBeenCalled();
+    expect(runtime.state.position).toBe("economy");
+  });
+
+  it("pauses upshift when the premium target is missing", async () => {
+    const deps = createDeps({
+      ...baseConfig,
+      upshiftAfterCompaction: true,
+      threshold: { percent: 50 },
+    });
+    const runtime = createEconomyRuntime();
+    const lowUsage = createLowUsageContext();
+
+    await maybeUpshift(deps, runtime, lowUsage);
+
+    expect(deps.switchToTarget).not.toHaveBeenCalled();
+    expect(runtime.state.paused).toBe(true);
+    expect(runtime.state.lastError).toBe("premium target is unset");
+  });
+
   it("manual model change pauses downshift and clears handoff", async () => {
     const deps = createDeps();
     const runtime = { state: createState({ handoff: "requested" }) };
@@ -327,5 +440,31 @@ describe("downshift core", () => {
       expect(restored?.continueAfterHandoff).toBe(false);
       expect(restored?.lastError).toBe("handoff interrupted by reload");
     }
+  });
+
+  it("restores captured premium targets and ignores invalid target shapes", () => {
+    const restored = restoreStateFromEntries(
+      [
+        {
+          type: "custom",
+          customType: "downshift-state",
+          data: createState({ capturedPremium: premium }),
+        },
+      ],
+      "session-1",
+    );
+    const invalid = restoreStateFromEntries(
+      [
+        {
+          type: "custom",
+          customType: "downshift-state",
+          data: { ...createState(), capturedPremium: { provider: "test" } },
+        },
+      ],
+      "session-1",
+    );
+
+    expect(restored?.capturedPremium).toEqual(premium);
+    expect(invalid?.capturedPremium).toBeUndefined();
   });
 });
