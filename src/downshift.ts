@@ -62,7 +62,7 @@ type ConfigField =
   | "upshiftAfterCompaction"
   | "handoffBeforeDownshift";
 
-const CONFIG_FIELD_PREFIXES: Array<[string, ConfigField | "done"]> = [
+const CONFIG_FIELD_PREFIXES: Array<[string, ConfigField]> = [
   ["enabled:", "enabled"],
   ["threshold:", "threshold"],
   ["economy:", "economy"],
@@ -70,7 +70,6 @@ const CONFIG_FIELD_PREFIXES: Array<[string, ConfigField | "done"]> = [
   ["start on premium:", "startOnPremium"],
   ["upshift after compaction:", "upshiftAfterCompaction"],
   ["handoff note:", "handoffBeforeDownshift"],
-  ["done", "done"],
 ];
 
 const BOOLEAN_FIELD_PROMPTS: Record<
@@ -373,16 +372,11 @@ function configMenuItems(config: DownshiftConfig): string[] {
     `start on premium: ${yesNo(config.startOnPremium)}`,
     `upshift after compaction: ${yesNo(config.upshiftAfterCompaction)}`,
     `handoff note: ${yesNo(config.handoffBeforeDownshift)}`,
-    "done",
   ];
 }
 
-function configFieldFromMenuItem(
-  item: string,
-): ConfigField | "done" | undefined {
-  return CONFIG_FIELD_PREFIXES.find(([prefix]) =>
-    prefix === "done" ? item === prefix : item.startsWith(prefix),
-  )?.[1];
+function configFieldFromMenuItem(item: string): ConfigField | undefined {
+  return CONFIG_FIELD_PREFIXES.find(([prefix]) => item.startsWith(prefix))?.[1];
 }
 
 async function selectBoolean(
@@ -558,10 +552,6 @@ async function configureMenu(
     if (!selected) return;
     const field = configFieldFromMenuItem(selected);
     if (!field) return;
-    if (field === "done") {
-      ctx.ui.notify("downshift config closed", "info");
-      return;
-    }
     const next = await editConfigField(ctx, config, field);
     if (!next) continue;
     config = next;
