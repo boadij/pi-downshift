@@ -225,6 +225,14 @@ Downshift is for a narrower case:
 
 That narrower scope makes Downshift easier to reason about, easier to configure, and less surprising during long coding sessions.
 
+## Relationship to pi-killswitch ☠️
+
+[`pi-downshift`](https://github.com/boadij/pi-downshift) switches to a cheaper model after a context threshold.
+
+[`pi-killswitch`](https://github.com/boadij/pi-killswitch) wraps up or kills the run after a context threshold.
+
+They solve related but different problems.
+
 ## Changelog 🗒️
 
 Release notes are generated from Conventional Commits.
