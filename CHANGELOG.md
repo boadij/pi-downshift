@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.13](https://github.com/boadij/pi-downshift/compare/v0.2.12...v0.2.13) (2026-06-08)
+
+
+### Documentation
+
+* document relationship to pi-killswitch in README ([bcb71b3](https://github.com/boadij/pi-downshift/commit/bcb71b32ee8298284b975d9dd906fcafea80c5ca))
+
 ## [0.2.12](https://github.com/boadij/pi-downshift/compare/v0.2.11...v0.2.12) (2026-06-08)
 
 
