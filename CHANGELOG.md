@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.12](https://github.com/boadij/pi-downshift/compare/v0.2.11...v0.2.12) (2026-06-08)
+
+
+### Documentation
+
+* update package description and author name in package.json ([7671da2](https://github.com/boadij/pi-downshift/commit/7671da2554454a463c519aa808b1dfa7959654a3))
+
 ## [0.2.11](https://github.com/boadij/pi-downshift/compare/v0.2.10...v0.2.11) (2026-06-07)
 
 
