@@ -1,7 +1,7 @@
 {
   "name": "pi-downshift",
   "version": "0.2.11",
-  "description": "A tiny Pi Coding Agent extension that switches from a premium model to an economy model when your context gets expensive.",
+  "description": "Start premium. Finish cheap. Downshift cuts long Pi Coding Agent session costs by switching from your premium model to an economy model when context gets expensive.",
   "type": "module",
   "main": "index.ts",
   "exports": {
@@ -54,7 +54,7 @@
   "publishConfig": {
     "access": "public"
   },
-  "author": "Jeff B",
+  "author": "Jeffrey Boadi",
   "license": "Apache-2.0",
   "repository": {
     "type": "git",
