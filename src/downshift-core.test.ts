@@ -113,14 +113,14 @@ describe("downshift core", () => {
     return { getContextUsage: () => ({ tokens: 500, percent: 20 }) };
   }
 
-  it("separates remaining token and percent thresholds with a pipe", () => {
+  it("formats premium status with remaining token and percent budget", () => {
     expect(
       statusText(
         { ...baseConfig, threshold: { tokens: 100_000, percent: 50 } },
         createState(),
         { tokens: 58_000, percent: 32 },
       ),
-    ).toBe("⇣ 42k | 18% → eco");
+    ).toBe("⇣ premium (42k | 18% left)");
   });
 
   it("formats status for disabled, paused, handoff, economy, and unknown usage states", () => {
@@ -158,10 +158,10 @@ describe("downshift core", () => {
         createState({ position: "economy" }),
         ctx.getContextUsage(),
       ),
-    ).toBe("⇣ eco");
+    ).toBe("⇣ economy");
     expect(
       statusText(baseConfig, createState(), { tokens: null, percent: null }),
-    ).toBe("⇣ ? → eco");
+    ).toBe("⇣ premium");
   });
 
   it("queues a steering handoff when threshold is reached during agent work", async () => {
