@@ -184,20 +184,21 @@ Prompt caching can reduce the cost of repeatedly sending that accumulated contex
 
 ## Status indicator 📊
 
-Downshift adds a compact status label:
+Downshift adds a compact status label that shows the current mode first:
 
 ```text
-⇣ 42k | 18% → eco
+⇣ premium (42k | 18% left)
 ```
 
-This means Downshift is active and will switch to the economy model when the configured context threshold is reached.
+This means Downshift is currently on premium with 42k tokens or 18 percentage points left before switching to the economy model.
 
 Other states:
 
 ```text
+⇣ premium
+⇣ economy
 ⇣ handoff
 ⇣ writing handoff
-⇣ eco
 ⇣ paused
 ⇣ off
 ```
