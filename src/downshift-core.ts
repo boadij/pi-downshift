@@ -195,7 +195,7 @@ export function statusText(
   if (state.paused) return "⇣ paused";
   if (state.handoff === "requested") return "⇣ handoff";
   if (state.handoff === "active") return "⇣ writing handoff";
-  if (state.position === "economy") return "⇣ eco";
+  if (state.position === "economy") return "⇣ economy";
 
   const parts: string[] = [];
   if (
@@ -217,7 +217,9 @@ export function statusText(
     );
   }
 
-  return parts.length === 0 ? "⇣ ? → eco" : `⇣ ${parts.join(" | ")} → eco`;
+  return parts.length === 0
+    ? "⇣ premium"
+    : `⇣ premium (${parts.join(" | ")} left)`;
 }
 
 function setState(
