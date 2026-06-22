@@ -1,6 +1,6 @@
 {
   "name": "pi-downshift",
-  "version": "0.2.13",
+  "version": "0.3.0",
   "description": "Start premium. Finish cheap. Downshift cuts long Pi Coding Agent session costs by switching from your premium model to an economy model when context gets expensive.",
   "type": "module",
   "main": "index.ts",
