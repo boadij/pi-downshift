@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.3.0](https://github.com/boadij/pi-downshift/compare/v0.2.13...v0.3.0) (2026-06-22)
+
+
+### Features
+
+* show current downshift mode in status ([6f4e998](https://github.com/boadij/pi-downshift/commit/6f4e998f033eb246808a836f947ee8f04f9c4ef1))
+
+
+### Documentation
+
+* describe mode-first status label ([a719aba](https://github.com/boadij/pi-downshift/commit/a719abacd5144ed2656250f959748b8c0e452dc6))
+
+
+### Tests
+
+* update status indicator expectations ([23cda35](https://github.com/boadij/pi-downshift/commit/23cda3549e2946ad8062ef6a9cbf78cb6497668e))
+
 ## [0.2.13](https://github.com/boadij/pi-downshift/compare/v0.2.12...v0.2.13) (2026-06-08)
 
 
