@@ -70,6 +70,8 @@ export type CoreDeps = {
 
 type UsageContext = { getContextUsage: () => ContextUsageLike | undefined };
 
+export type CompactionEventLike = { compactionEntry?: unknown };
+
 export const HANDOFF_MARKER = "<!-- downshift:handoff:v1 -->";
 export const CONTINUE_MARKER = "<!-- downshift:continue:v1 -->";
 
@@ -159,24 +161,6 @@ export function thresholdReached(
   )
     return true;
   return false;
-}
-
-function belowThreshold(
-  usage: ContextUsageLike | undefined,
-  threshold: Threshold,
-): boolean {
-  if (!usage) return false;
-  if (
-    threshold.tokens &&
-    (usage.tokens === null || usage.tokens >= threshold.tokens)
-  )
-    return false;
-  if (
-    threshold.percent &&
-    (usage.percent === null || usage.percent >= threshold.percent)
-  )
-    return false;
-  return true;
 }
 
 export function formatCompactNumber(value: number): string {
@@ -419,14 +403,14 @@ export async function maybeDownshift(
   return runtime.state;
 }
 
-export async function maybeUpshift(
+export async function maybeUpshiftAfterCompaction(
   deps: CoreDeps,
   runtime: Runtime,
-  ctx: UsageContext,
+  event: CompactionEventLike,
 ): Promise<DownshiftState> {
   const config = await deps.readConfig();
   deps.updateStatus(config);
-  if (!canUpshift(config, runtime.state, ctx.getContextUsage()))
+  if (!canUpshiftAfterCompaction(config, runtime.state, event))
     return runtime.state;
   const premium = resolvePremium(config, runtime.state);
   if (!premium) {
@@ -439,18 +423,18 @@ export async function maybeUpshift(
   return runtime.state;
 }
 
-function canUpshift(
+function canUpshiftAfterCompaction(
   config: DownshiftConfig | undefined,
   state: DownshiftState,
-  usage: ContextUsageLike | undefined,
+  event: CompactionEventLike,
 ): config is DownshiftConfig {
   return (
+    event.compactionEntry !== undefined &&
     !!config?.enabled &&
     config.upshiftAfterCompaction &&
     state.sessionEnabled &&
     !state.paused &&
-    state.position === "economy" &&
-    belowThreshold(usage, config.threshold)
+    state.position === "economy"
   );
 }
 

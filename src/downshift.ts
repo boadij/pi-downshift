@@ -18,7 +18,7 @@ import {
   handleBeforeAgentStart,
   handleManualModelSelect,
   maybeDownshift,
-  maybeUpshift,
+  maybeUpshiftAfterCompaction,
   parseTarget,
   formatCompactNumber,
   restoreStateFromEntries,
@@ -923,8 +923,8 @@ export default function downshift(pi: ExtensionAPI): void {
     await handleAgentEnd(coreDeps(pi, ctx), runtime, _event, ctx);
   });
 
-  pi.on("session_compact", async (_event, ctx) => {
-    await maybeUpshift(coreDeps(pi, ctx), runtime, ctx);
+  pi.on("session_compact", async (event, ctx) => {
+    await maybeUpshiftAfterCompaction(coreDeps(pi, ctx), runtime, event);
   });
 
   pi.on("model_select", async (event, ctx) => {

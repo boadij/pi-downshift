@@ -7,7 +7,7 @@ import {
   handleBeforeAgentStart,
   handleManualModelSelect,
   maybeDownshift,
-  maybeUpshift,
+  maybeUpshiftAfterCompaction,
   restoreStateFromEntries,
   statusText,
   type DownshiftConfig,
@@ -107,10 +107,6 @@ describe("downshift core", () => {
 
   function createEconomyRuntime() {
     return { state: createState({ position: "economy" }) };
-  }
-
-  function createLowUsageContext() {
-    return { getContextUsage: () => ({ tokens: 500, percent: 20 }) };
   }
 
   it("formats premium status with remaining token and percent budget", () => {
@@ -360,12 +356,13 @@ describe("downshift core", () => {
     expect(runtime.state.position).toBe("economy");
   });
 
-  it("upshifts when compaction drops usage below threshold", async () => {
+  it("upshifts after compaction even when immediate usage is unknown", async () => {
     const deps = createUpshiftDeps();
     const runtime = createEconomyRuntime();
-    const lowUsage = createLowUsageContext();
 
-    await maybeUpshift(deps, runtime, lowUsage);
+    await maybeUpshiftAfterCompaction(deps, runtime, {
+      compactionEntry: {},
+    });
 
     expect(deps.switchToTarget).toHaveBeenCalledWith(
       premium,
@@ -376,16 +373,11 @@ describe("downshift core", () => {
     expect(runtime.state.handoff).toBe("idle");
   });
 
-  it("does not upshift when usage is unknown or still above threshold", async () => {
+  it("does not upshift after compaction without a compaction entry", async () => {
     const deps = createUpshiftDeps();
-    const runtime = { state: createState({ position: "economy" }) };
+    const runtime = createEconomyRuntime();
 
-    await maybeUpshift(deps, runtime, {
-      getContextUsage: () => ({ tokens: null, percent: 20 }),
-    });
-    await maybeUpshift(deps, runtime, {
-      getContextUsage: () => ({ tokens: 500, percent: 60 }),
-    });
+    await maybeUpshiftAfterCompaction(deps, runtime, {});
 
     expect(deps.switchToTarget).not.toHaveBeenCalled();
     expect(runtime.state.position).toBe("economy");
@@ -398,9 +390,8 @@ describe("downshift core", () => {
       threshold: { percent: 50 },
     });
     const runtime = createEconomyRuntime();
-    const lowUsage = createLowUsageContext();
 
-    await maybeUpshift(deps, runtime, lowUsage);
+    await maybeUpshiftAfterCompaction(deps, runtime, { compactionEntry: {} });
 
     expect(deps.switchToTarget).not.toHaveBeenCalled();
     expect(runtime.state.paused).toBe(true);

@@ -47,7 +47,7 @@ This keeps Downshift simple: premium handles orientation, economy handles contin
 - Supports token thresholds, percent thresholds, or both
 - Remembers whether the session is premium, economy, paused, or mid-handoff
 - Pauses automatically after manual model changes
-- Optionally switches back to premium after compaction
+- Optionally switches back to premium after successful compaction, even while immediate post-compaction usage telemetry is still unknown
 - Shows a compact status indicator in the UI
 - Provides simple `/downshift` commands
 
