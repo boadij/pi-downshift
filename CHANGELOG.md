@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.0](https://github.com/boadij/pi-downshift/compare/v0.3.0...v0.4.0) (2026-06-26)
+
+
+### Features
+
+* **core:** upshift after compaction regardless of usage thresholds ([69f948e](https://github.com/boadij/pi-downshift/commit/69f948e4f49f170f68e10146de2182c0e25aa531))
+
 ## [0.3.0](https://github.com/boadij/pi-downshift/compare/v0.2.13...v0.3.0) (2026-06-22)
 
 
