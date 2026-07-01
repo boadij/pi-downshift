@@ -70,7 +70,7 @@ function createDeps(config = baseConfig): TestDeps {
 
 function createState(patch: Partial<DownshiftState> = {}): DownshiftState {
   return {
-    sessionEnabled: true,
+    sessionMode: "inherit",
     paused: false,
     position: "premium",
     handoff: "idle",
@@ -129,6 +129,13 @@ describe("downshift core", () => {
     ).toBe("⇣ off");
     expect(
       statusText(
+        { ...baseConfig, enabled: false },
+        createState({ sessionMode: "on" }),
+        ctx.getContextUsage(),
+      ),
+    ).toBe("⇣ premium (0% left)");
+    expect(
+      statusText(
         baseConfig,
         createState({ paused: true }),
         ctx.getContextUsage(),
@@ -174,6 +181,27 @@ describe("downshift core", () => {
     expect(deps.sendUserMessage).toHaveBeenCalledWith(expect.any(String), {
       deliverAs: "steer",
     });
+    expect(deps.switchToTarget).not.toHaveBeenCalled();
+  });
+
+  it("downshifts when the session explicitly overrides a disabled config", async () => {
+    const deps = createDeps({ ...baseConfig, enabled: false });
+    const runtime = { state: createState({ sessionMode: "on" }) };
+
+    await maybeDownshift(deps, runtime, ctx, "steer");
+
+    expectPendingHandoff(runtime, true);
+    expect(deps.sendUserMessage).toHaveBeenCalledOnce();
+  });
+
+  it("stays off when config is disabled without a session override", async () => {
+    const deps = createDeps({ ...baseConfig, enabled: false });
+    const runtime = { state: createState() };
+
+    await maybeDownshift(deps, runtime, ctx, "steer");
+
+    expect(runtime.state.handoff).toBe("idle");
+    expect(deps.sendUserMessage).not.toHaveBeenCalled();
     expect(deps.switchToTarget).not.toHaveBeenCalled();
   });
 

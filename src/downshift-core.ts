@@ -22,10 +22,11 @@ export type DownshiftConfig = {
 
 export type Position = "premium" | "economy";
 export type HandoffState = "idle" | "requested" | "active" | "done";
+export type SessionMode = "inherit" | "on" | "off";
 
 export type DownshiftState = {
   sessionId?: string;
-  sessionEnabled: boolean;
+  sessionMode: SessionMode;
   paused: boolean;
   position: Position;
   handoff: HandoffState;
@@ -39,7 +40,11 @@ export type ContextUsageLike = {
   percent: number | null;
 };
 
-type StateEntry = Partial<DownshiftState> & { version?: number };
+type StateEntry = Partial<DownshiftState> & {
+  version?: number;
+  sessionEnabled?: boolean;
+  sessionOverride?: boolean;
+};
 
 type PersistedStateEntry = {
   type?: string;
@@ -77,7 +82,7 @@ export const CONTINUE_MARKER = "<!-- downshift:continue:v1 -->";
 
 export function createInitialState(): DownshiftState {
   return {
-    sessionEnabled: true,
+    sessionMode: "inherit",
     paused: false,
     position: "premium",
     handoff: "idle",
@@ -125,7 +130,7 @@ function restoredState(data: StateEntry, sessionId: string): DownshiftState {
   const interrupted = data.handoff === "requested" || data.handoff === "active";
   return {
     sessionId: typeof data.sessionId === "string" ? data.sessionId : sessionId,
-    sessionEnabled: data.sessionEnabled !== false,
+    sessionMode: restoredSessionMode(data),
     paused: interrupted || data.paused === true,
     position: data.position === "economy" ? "economy" : "premium",
     handoff: data.handoff === "done" ? "done" : "idle",
@@ -133,6 +138,14 @@ function restoredState(data: StateEntry, sessionId: string): DownshiftState {
     capturedPremium: parseTarget(data.capturedPremium),
     lastError: restoredLastError(data, interrupted),
   };
+}
+
+function restoredSessionMode(data: StateEntry): SessionMode {
+  if (data.sessionMode === "on" || data.sessionMode === "off")
+    return data.sessionMode;
+  if (data.sessionOverride === true) return "on";
+  if (data.sessionEnabled === false) return "off";
+  return "inherit";
 }
 
 function restoredLastError(
@@ -175,7 +188,7 @@ export function statusText(
   state: DownshiftState,
   usage: ContextUsageLike | undefined,
 ): string {
-  if (!config?.enabled || !state.sessionEnabled) return "⇣ off";
+  if (!isDownshiftEnabled(config, state)) return "⇣ off";
   if (state.paused) return "⇣ paused";
   if (state.handoff === "requested") return "⇣ handoff";
   if (state.handoff === "active") return "⇣ writing handoff";
@@ -204,6 +217,17 @@ export function statusText(
   return parts.length === 0
     ? "⇣ premium"
     : `⇣ premium (${parts.join(" | ")} left)`;
+}
+
+function isDownshiftEnabled(
+  config: DownshiftConfig | undefined,
+  state: DownshiftState,
+): config is DownshiftConfig {
+  return (
+    !!config &&
+    state.sessionMode !== "off" &&
+    (config.enabled || state.sessionMode === "on")
+  );
 }
 
 function setState(
@@ -273,13 +297,13 @@ export async function forceDownshiftNow(
     deps.notify("downshift: config missing", "warning");
     return runtime.state;
   }
-  if (!config.enabled) {
+  if (!config.enabled && runtime.state.sessionMode !== "on") {
     deps.notify("downshift: disabled in config", "warning");
     return runtime.state;
   }
-  if (!runtime.state.sessionEnabled || runtime.state.paused) {
+  if (runtime.state.sessionMode === "off" || runtime.state.paused) {
     setState(deps, runtime, {
-      sessionEnabled: true,
+      sessionMode: "on",
       paused: false,
       lastError: undefined,
     });
@@ -331,8 +355,7 @@ function canCompleteHandoff(
   state: DownshiftState,
 ): config is DownshiftConfig {
   return (
-    !!config?.enabled &&
-    state.sessionEnabled &&
+    isDownshiftEnabled(config, state) &&
     !state.paused &&
     state.position !== "economy"
   );
@@ -371,8 +394,7 @@ export async function maybeDownshift(
   const config = await deps.readConfig();
   deps.updateStatus(config);
   if (
-    !config?.enabled ||
-    !runtime.state.sessionEnabled ||
+    !isDownshiftEnabled(config, runtime.state) ||
     runtime.state.paused ||
     runtime.state.position === "economy"
   )
@@ -430,9 +452,8 @@ function canUpshiftAfterCompaction(
 ): config is DownshiftConfig {
   return (
     event.compactionEntry !== undefined &&
-    !!config?.enabled &&
+    isDownshiftEnabled(config, state) &&
     config.upshiftAfterCompaction &&
-    state.sessionEnabled &&
     !state.paused &&
     state.position === "economy"
   );
@@ -514,7 +535,7 @@ export async function handleManualModelSelect(
 ): Promise<DownshiftState> {
   if (event.source === "restore") return runtime.state;
   const config = await deps.readConfig();
-  if (!config?.enabled || !runtime.state.sessionEnabled) {
+  if (!isDownshiftEnabled(config, runtime.state)) {
     deps.updateStatus(config);
     return runtime.state;
   }

@@ -791,7 +791,7 @@ async function disableSession(
   ctx: ExtensionCommandContext,
 ): Promise<void> {
   saveState(pi, {
-    sessionEnabled: false,
+    sessionMode: "off",
     handoff: "idle",
     continueAfterHandoff: false,
   });
@@ -821,7 +821,7 @@ function enabledSessionState(
   config: DownshiftConfig | undefined,
 ): Partial<DownshiftState> {
   return {
-    sessionEnabled: true,
+    sessionMode: "on",
     paused: false,
     position: "premium",
     lastError: undefined,
@@ -874,7 +874,7 @@ function initialSessionState(
 ): DownshiftState {
   return {
     sessionId: ctx.sessionManager.getSessionId(),
-    sessionEnabled: true,
+    sessionMode: "inherit",
     paused: false,
     position: "premium",
     handoff: "idle",
