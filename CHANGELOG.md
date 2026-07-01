@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.0](https://github.com/boadij/pi-downshift/compare/v0.4.0...v0.5.0) (2026-07-01)
+
+
+### Features
+
+* **core:** replace sessionEnabled boolean with sessionMode tri-state ([ce1d895](https://github.com/boadij/pi-downshift/commit/ce1d89539c22035fc815c1324d13c6424920ce68))
+
 ## [0.4.0](https://github.com/boadij/pi-downshift/compare/v0.3.0...v0.4.0) (2026-06-26)
 
 
