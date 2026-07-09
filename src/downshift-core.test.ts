@@ -10,6 +10,7 @@ import {
   maybeUpshiftAfterCompaction,
   restoreStateFromEntries,
   statusText,
+  thresholdReached,
   type DownshiftConfig,
   type DownshiftState,
   type ModelTarget,
@@ -85,6 +86,43 @@ const ctx = {
 
 describe("downshift core", () => {
   beforeEach(() => vi.clearAllMocks());
+
+  describe("thresholdReached", () => {
+    it("detects a token threshold independently of percent usage", () => {
+      expect(
+        thresholdReached({ tokens: 10_000, percent: 20 }, { tokens: 10_000 }),
+      ).toBe(true);
+      expect(
+        thresholdReached(
+          { tokens: 10_000, percent: 20 },
+          { tokens: 10_000, percent: 50 },
+        ),
+      ).toBe(true);
+    });
+
+    it("detects a percent threshold independently of token usage", () => {
+      expect(
+        thresholdReached({ tokens: null, percent: 50 }, { percent: 50 }),
+      ).toBe(true);
+      expect(
+        thresholdReached({ tokens: 10_000, percent: 51 }, { percent: 50 }),
+      ).toBe(true);
+    });
+
+    it("does not reach a threshold when the relevant usage is null", () => {
+      expect(
+        thresholdReached({ tokens: null, percent: 99 }, { tokens: 100 }),
+      ).toBe(false);
+      expect(
+        thresholdReached({ tokens: 100, percent: null }, { percent: 50 }),
+      ).toBe(false);
+    });
+
+    it("does not reach a threshold when usage is missing", () => {
+      expect(thresholdReached(undefined, { tokens: 100 })).toBe(false);
+      expect(thresholdReached(undefined, { percent: 50 })).toBe(false);
+    });
+  });
 
   function expectPendingHandoff(
     runtime: { state: ReturnType<typeof createState> },
@@ -203,6 +241,36 @@ describe("downshift core", () => {
     expect(runtime.state.handoff).toBe("idle");
     expect(deps.sendUserMessage).not.toHaveBeenCalled();
     expect(deps.switchToTarget).not.toHaveBeenCalled();
+  });
+
+  it("does nothing while paused even when the threshold is reached", async () => {
+    const deps = createDeps();
+    const runtime = { state: createState({ paused: true }) };
+
+    await maybeDownshift(deps, runtime, ctx, "steer");
+
+    expect(deps.sendUserMessage).not.toHaveBeenCalled();
+    expect(deps.switchToTarget).not.toHaveBeenCalled();
+    expect(runtime.state).toEqual(createState({ paused: true }));
+  });
+
+  it("does nothing while usage is below the configured threshold", async () => {
+    const deps = createDeps({
+      ...baseConfig,
+      threshold: { tokens: 1_000, percent: 50 },
+    });
+    const runtime = { state: createState() };
+
+    await maybeDownshift(
+      deps,
+      runtime,
+      { getContextUsage: () => ({ tokens: 999, percent: 49 }) },
+      "steer",
+    );
+
+    expect(deps.sendUserMessage).not.toHaveBeenCalled();
+    expect(deps.switchToTarget).not.toHaveBeenCalled();
+    expect(runtime.state).toEqual(createState());
   });
 
   it("sends an immediate handoff when threshold is reached while idle", async () => {
@@ -401,6 +469,23 @@ describe("downshift core", () => {
     expect(runtime.state.handoff).toBe("idle");
   });
 
+  it("does not upshift after compaction when upshift is not configured", async () => {
+    const deps = createDeps({
+      ...baseConfig,
+      premiumSource: "explicit",
+      premium,
+      upshiftAfterCompaction: false,
+    });
+    const runtime = createEconomyRuntime();
+
+    await maybeUpshiftAfterCompaction(deps, runtime, {
+      compactionEntry: {},
+    });
+
+    expect(deps.switchToTarget).not.toHaveBeenCalled();
+    expect(runtime.state.position).toBe("economy");
+  });
+
   it("does not upshift after compaction without a compaction entry", async () => {
     const deps = createUpshiftDeps();
     const runtime = createEconomyRuntime();
@@ -459,6 +544,53 @@ describe("downshift core", () => {
       expect(restored?.continueAfterHandoff).toBe(false);
       expect(restored?.lastError).toBe("handoff interrupted by reload");
     }
+  });
+
+  it("restores the newest valid state entry", () => {
+    const restored = restoreStateFromEntries(
+      [
+        {
+          type: "custom",
+          customType: "downshift-state",
+          data: createState({ position: "premium" }),
+        },
+        {
+          type: "custom",
+          customType: "downshift-state",
+          data: createState({ position: "economy", paused: true }),
+        },
+      ],
+      "session-1",
+    );
+
+    expect(restored?.position).toBe("economy");
+    expect(restored?.paused).toBe(true);
+  });
+
+  it("restores legacy session flags", () => {
+    const restoredOverride = restoreStateFromEntries(
+      [
+        {
+          type: "custom",
+          customType: "downshift-state",
+          data: { sessionOverride: true },
+        },
+      ],
+      "session-1",
+    );
+    const restoredDisabled = restoreStateFromEntries(
+      [
+        {
+          type: "custom",
+          customType: "downshift-state",
+          data: { sessionEnabled: false },
+        },
+      ],
+      "session-1",
+    );
+
+    expect(restoredOverride?.sessionMode).toBe("on");
+    expect(restoredDisabled?.sessionMode).toBe("off");
   });
 
   it("restores captured premium targets and ignores invalid target shapes", () => {
