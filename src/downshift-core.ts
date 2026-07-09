@@ -540,11 +540,7 @@ export async function handleManualThinkingLevelSelect(
   _event: unknown,
   _ctx: UsageContext,
 ): Promise<DownshiftState> {
-  return pauseForManualChange(
-    deps,
-    runtime,
-    "manual thinking level change",
-  );
+  return pauseForManualChange(deps, runtime, "manual thinking level change");
 }
 
 async function pauseForManualChange(

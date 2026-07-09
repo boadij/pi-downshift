@@ -954,7 +954,12 @@ export default function downshift(pi: ExtensionAPI): void {
 
   pi.on("thinking_level_select", async (event, ctx) => {
     if (internalTargetChange) return;
-    await handleManualThinkingLevelSelect(coreDeps(pi, ctx), runtime, event, ctx);
+    await handleManualThinkingLevelSelect(
+      coreDeps(pi, ctx),
+      runtime,
+      event,
+      ctx,
+    );
   });
 
   pi.registerCommand("downshift", {
