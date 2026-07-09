@@ -230,6 +230,10 @@ function isDownshiftEnabled(
   );
 }
 
+function hasPendingHandoff(state: DownshiftState): boolean {
+  return state.handoff === "requested" || state.handoff === "active";
+}
+
 function setState(
   deps: CoreDeps,
   runtime: Runtime,
@@ -312,10 +316,7 @@ export async function forceDownshiftNow(
     deps.notify("downshift: already on economy", "info");
     return runtime.state;
   }
-  if (
-    runtime.state.handoff === "requested" ||
-    runtime.state.handoff === "active"
-  ) {
+  if (hasPendingHandoff(runtime.state)) {
     deps.notify("downshift: handoff already pending", "info");
     return runtime.state;
   }
@@ -399,11 +400,7 @@ export async function maybeDownshift(
     runtime.state.position === "economy"
   )
     return runtime.state;
-  if (
-    runtime.state.handoff === "requested" ||
-    runtime.state.handoff === "active"
-  )
-    return runtime.state;
+  if (hasPendingHandoff(runtime.state)) return runtime.state;
   if (!thresholdReached(ctx.getContextUsage(), config.threshold))
     return runtime.state;
   if (config.handoffBeforeDownshift && runtime.state.handoff === "idle") {
