@@ -179,6 +179,14 @@ function updateStatus(ctx: ExtensionContext, config?: DownshiftConfig): void {
   );
 }
 
+async function refreshStatus(
+  ctx: ExtensionContext,
+): Promise<DownshiftConfig | undefined> {
+  const config = await readConfig();
+  updateStatus(ctx, config);
+  return config;
+}
+
 function saveState(pi: ExtensionAPI, patch?: Partial<DownshiftState>): void {
   if (patch) runtime.state = { ...runtime.state, ...patch };
   pi.appendEntry<StateEntry>(CUSTOM_TYPE, { version: 1, ...runtime.state });
@@ -526,7 +534,7 @@ async function configureInitial(ctx: ExtensionCommandContext): Promise<void> {
   const threshold = { tokens: 100000, percent: 50 };
   const economy = await selectTarget(ctx, "Select economy model");
   if (!economy) return;
-  await writeConfig({
+  const config: DownshiftConfig = {
     enabled,
     threshold,
     economy,
@@ -535,7 +543,9 @@ async function configureInitial(ctx: ExtensionCommandContext): Promise<void> {
     startOnPremium,
     upshiftAfterCompaction: false,
     handoffBeforeDownshift: true,
-  });
+  };
+  await writeConfig(config);
+  updateStatus(ctx, config);
   ctx.ui.notify("downshift config created", "info");
 }
 
@@ -556,6 +566,7 @@ async function configureMenu(
     if (!next) continue;
     config = next;
     await writeConfig(config);
+    updateStatus(ctx, config);
     ctx.ui.notify("downshift config saved", "info");
   }
 }
@@ -775,7 +786,7 @@ async function downshiftNow(
     runtime,
     ctx.isIdle() ? "immediate" : "steer",
   );
-  updateStatus(ctx, await readConfig());
+  await refreshStatus(ctx);
 }
 
 async function setSessionEnabled(
@@ -795,7 +806,7 @@ async function disableSession(
     handoff: "idle",
     continueAfterHandoff: false,
   });
-  updateStatus(ctx, await readConfig());
+  await refreshStatus(ctx);
   ctx.ui.notify("downshift off for this session", "info");
 }
 
@@ -901,6 +912,13 @@ function hasExplicitStartPremium(
   return !!config?.enabled && config.startOnPremium && !!config.premium;
 }
 
+type ExtensionAPIWithAgentSettled = ExtensionAPI & {
+  on(
+    event: "agent_settled",
+    handler: (event: unknown, ctx: ExtensionContext) => void | Promise<void>,
+  ): void;
+};
+
 export default function downshift(pi: ExtensionAPI): void {
   pi.on("session_start", async (event, ctx) => {
     await handleSessionStart(pi, event, ctx);
@@ -914,6 +932,17 @@ export default function downshift(pi: ExtensionAPI): void {
       ctx.isIdle() ? "immediate" : "steer",
     );
   });
+
+  pi.on("turn_end", async (_event, ctx) => {
+    await refreshStatus(ctx);
+  });
+
+  (pi as ExtensionAPIWithAgentSettled).on(
+    "agent_settled",
+    async (_event, ctx) => {
+      await refreshStatus(ctx);
+    },
+  );
 
   pi.on("before_agent_start", async (event, ctx) => {
     await handleBeforeAgentStart(coreDeps(pi, ctx), runtime, event, ctx);
