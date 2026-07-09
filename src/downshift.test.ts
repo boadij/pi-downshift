@@ -49,10 +49,7 @@ function createExtension(): TestExtension {
     on: (event: string, handler: EventHandler) => {
       handlers.set(event, handler);
     },
-    registerCommand: (
-      name: string,
-      options: { handler: CommandHandler },
-    ) => {
+    registerCommand: (name: string, options: { handler: CommandHandler }) => {
       commands.set(name, options.handler);
     },
     appendEntry: vi.fn(),
@@ -64,7 +61,9 @@ function createExtension(): TestExtension {
   return { handlers, commands, pi };
 }
 
-function createContext(usage: { current: { tokens: number; percent: number } }) {
+function createContext(usage: {
+  current: { tokens: number; percent: number };
+}) {
   const status = vi.fn();
   const select = vi.fn();
   const input = vi.fn();
