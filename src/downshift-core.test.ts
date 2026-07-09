@@ -6,6 +6,7 @@ import {
   handleAgentEnd,
   handleBeforeAgentStart,
   handleManualModelSelect,
+  handleManualThinkingLevelSelect,
   maybeDownshift,
   maybeUpshiftAfterCompaction,
   restoreStateFromEntries,
@@ -518,12 +519,47 @@ describe("downshift core", () => {
     await handleManualModelSelect(deps, runtime, { source: "restore" }, ctx);
     expect(runtime.state).toEqual(createState({ handoff: "requested" }));
 
-    await handleManualModelSelect(deps, runtime, { source: "user" }, ctx);
+    await handleManualModelSelect(deps, runtime, { source: "cycle" }, ctx);
 
     expect(runtime.state.paused).toBe(true);
     expect(runtime.state.handoff).toBe("idle");
     expect(runtime.state.position).toBe("premium");
     expect(runtime.state.lastError).toBe("manual model change");
+  });
+
+  it("manual thinking level change pauses downshift and clears handoff", async () => {
+    const deps = createDeps();
+    const runtime = { state: createState({ handoff: "active" }) };
+
+    await handleManualThinkingLevelSelect(
+      deps,
+      runtime,
+      { level: "high", previousLevel: "medium" },
+      ctx,
+    );
+
+    expect(runtime.state.paused).toBe(true);
+    expect(runtime.state.handoff).toBe("idle");
+    expect(runtime.state.continueAfterHandoff).toBe(false);
+    expect(runtime.state.lastError).toBe("manual thinking level change");
+  });
+
+  it("does not pause for a manual thinking level change when disabled", async () => {
+    const deps = createDeps({ ...baseConfig, enabled: false });
+    const runtime = { state: createState({ handoff: "requested" }) };
+
+    await handleManualThinkingLevelSelect(
+      deps,
+      runtime,
+      { level: "high", previousLevel: "medium" },
+      ctx,
+    );
+
+    expect(runtime.state).toEqual(createState({ handoff: "requested" }));
+    expect(deps.updateStatus).toHaveBeenCalledWith({
+      ...baseConfig,
+      enabled: false,
+    });
   });
 
   it("restores interrupted handoff as paused instead of stranded", () => {

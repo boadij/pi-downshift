@@ -17,6 +17,7 @@ import {
   handleAgentEnd,
   handleBeforeAgentStart,
   handleManualModelSelect,
+  handleManualThinkingLevelSelect,
   maybeDownshift,
   maybeUpshiftAfterCompaction,
   parseTarget,
@@ -94,7 +95,7 @@ type ConfigFieldEditor = (
 ) => Promise<DownshiftConfig | undefined>;
 
 let runtime: Runtime = { state: createInitialState() };
-let internalModelChange = false;
+let internalTargetChange = false;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -228,7 +229,7 @@ async function switchToTarget(
     return pause(pi, ctx, `thinking level unsupported: ${targetLabel(target)}`);
   }
   try {
-    internalModelChange = true;
+    internalTargetChange = true;
     const ok = await pi.setModel(model);
     if (!ok)
       return pause(
@@ -244,7 +245,7 @@ async function switchToTarget(
     const message = error instanceof Error ? error.message : String(error);
     return pause(pi, ctx, message);
   } finally {
-    internalModelChange = false;
+    internalTargetChange = false;
   }
 }
 
@@ -912,13 +913,6 @@ function hasExplicitStartPremium(
   return !!config?.enabled && config.startOnPremium && !!config.premium;
 }
 
-type ExtensionAPIWithAgentSettled = ExtensionAPI & {
-  on(
-    event: "agent_settled",
-    handler: (event: unknown, ctx: ExtensionContext) => void | Promise<void>,
-  ): void;
-};
-
 export default function downshift(pi: ExtensionAPI): void {
   pi.on("session_start", async (event, ctx) => {
     await handleSessionStart(pi, event, ctx);
@@ -937,12 +931,9 @@ export default function downshift(pi: ExtensionAPI): void {
     await refreshStatus(ctx);
   });
 
-  (pi as ExtensionAPIWithAgentSettled).on(
-    "agent_settled",
-    async (_event, ctx) => {
-      await refreshStatus(ctx);
-    },
-  );
+  pi.on("agent_settled", async (_event, ctx) => {
+    await refreshStatus(ctx);
+  });
 
   pi.on("before_agent_start", async (event, ctx) => {
     await handleBeforeAgentStart(coreDeps(pi, ctx), runtime, event, ctx);
@@ -957,8 +948,18 @@ export default function downshift(pi: ExtensionAPI): void {
   });
 
   pi.on("model_select", async (event, ctx) => {
-    if (internalModelChange) return;
+    if (internalTargetChange) return;
     await handleManualModelSelect(coreDeps(pi, ctx), runtime, event, ctx);
+  });
+
+  pi.on("thinking_level_select", async (event, ctx) => {
+    if (internalTargetChange) return;
+    await handleManualThinkingLevelSelect(
+      coreDeps(pi, ctx),
+      runtime,
+      event,
+      ctx,
+    );
   });
 
   pi.registerCommand("downshift", {

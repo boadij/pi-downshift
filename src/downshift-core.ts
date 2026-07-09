@@ -531,6 +531,23 @@ export async function handleManualModelSelect(
   _ctx: UsageContext,
 ): Promise<DownshiftState> {
   if (event.source === "restore") return runtime.state;
+  return pauseForManualChange(deps, runtime, "manual model change");
+}
+
+export async function handleManualThinkingLevelSelect(
+  deps: CoreDeps,
+  runtime: Runtime,
+  _event: unknown,
+  _ctx: UsageContext,
+): Promise<DownshiftState> {
+  return pauseForManualChange(deps, runtime, "manual thinking level change");
+}
+
+async function pauseForManualChange(
+  deps: CoreDeps,
+  runtime: Runtime,
+  reason: string,
+): Promise<DownshiftState> {
   const config = await deps.readConfig();
   if (!isDownshiftEnabled(config, runtime.state)) {
     deps.updateStatus(config);
@@ -541,7 +558,7 @@ export async function handleManualModelSelect(
     position: "premium",
     handoff: "idle",
     continueAfterHandoff: false,
-    lastError: "manual model change",
+    lastError: reason,
   });
   deps.updateStatus(config);
   return runtime.state;
