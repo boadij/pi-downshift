@@ -117,6 +117,12 @@ describe("downshift lifecycle adapter", () => {
     expect(pi.setModel).not.toHaveBeenCalled();
   });
 
+  it("registers a thinking level select handler", () => {
+    const { handlers } = createExtension();
+
+    expect(handlers.has("thinking_level_select")).toBe(true);
+  });
+
   it("refreshes status immediately after saving configuration", async () => {
     const usage = { current: { tokens: 100, percent: 10 } };
     const { commands } = createExtension();
