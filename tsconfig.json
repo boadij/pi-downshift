@@ -9,5 +9,5 @@
     "noEmit": true,
     "types": ["node", "vitest/globals"]
   },
-  "include": ["downshift.ts", "src/**/*.ts"]
+  "include": ["index.ts", "src/**/*.ts"]
 }
