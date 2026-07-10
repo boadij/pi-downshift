@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.6.0](https://github.com/boadij/pi-downshift/compare/v0.5.0...v0.6.0) (2026-07-10)
+
+
+### Features
+
+* **status:** refresh Downshift footer at durable lifecycle points ([#20](https://github.com/boadij/pi-downshift/issues/20)) ([7ef1874](https://github.com/boadij/pi-downshift/commit/7ef18748400c7cf098e5f63bdf8efe71afd69239))
+
+
+### Bug Fixes
+
+* **commands:** remove stale config command reference ([#24](https://github.com/boadij/pi-downshift/issues/24)) ([fd66734](https://github.com/boadij/pi-downshift/commit/fd667342851f86bffe89cce0f37c91723ee51ff0))
+* pause downshift on manual thinking level changes ([#23](https://github.com/boadij/pi-downshift/issues/23)) ([71d1a3c](https://github.com/boadij/pi-downshift/commit/71d1a3c5a59e593c888b73ceb11b3d2e6141b7c3))
+
+
+### Tests
+
+* cover downshift core state transitions ([#22](https://github.com/boadij/pi-downshift/issues/22)) ([5e9c1d4](https://github.com/boadij/pi-downshift/commit/5e9c1d44acfc6cadafb03ef0cbf3a0c6d2c2a17a))
+
 ## [0.5.0](https://github.com/boadij/pi-downshift/compare/v0.4.0...v0.5.0) (2026-07-01)
 
 
