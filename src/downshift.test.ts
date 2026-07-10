@@ -67,6 +67,7 @@ function createContext(usage: {
   const status = vi.fn();
   const select = vi.fn();
   const input = vi.fn();
+  const notify = vi.fn();
   const ctx = {
     hasUI: true,
     getContextUsage: () => usage.current,
@@ -74,13 +75,14 @@ function createContext(usage: {
       setStatus: status,
       select,
       input,
-      notify: vi.fn(),
+      notify,
     },
   };
   return {
     commandContext: ctx as unknown as ExtensionCommandContext,
     context: ctx as unknown as ExtensionContext,
     input,
+    notify,
     select,
     status,
   };
@@ -123,7 +125,7 @@ describe("downshift lifecycle adapter", () => {
     expect(handlers.has("thinking_level_select")).toBe(true);
   });
 
-  it("refreshes status immediately after saving configuration", async () => {
+  it("opens configuration for the bare command", async () => {
     const usage = { current: { tokens: 100, percent: 10 } };
     const { commands } = createExtension();
     const { commandContext, select, input, status } = createContext(usage);
@@ -142,6 +144,41 @@ describe("downshift lifecycle adapter", () => {
     );
     expect(fsMocks.writeFile.mock.invocationCallOrder[0]).toBeLessThan(
       status.mock.invocationCallOrder[0],
+    );
+  });
+
+  it("warns with help for the unsupported config subcommand", async () => {
+    const { commands } = createExtension();
+    const { commandContext, notify } = createContext({
+      current: { tokens: 100, percent: 10 },
+    });
+
+    await commands.get("downshift")?.("config", commandContext);
+
+    expect(notify).toHaveBeenCalledWith(
+      expect.stringContaining("/downshift - configure Downshift"),
+      "warning",
+    );
+    expect(fsMocks.writeFile).not.toHaveBeenCalled();
+  });
+
+  it("does not advertise the unsupported config subcommand in help or status", async () => {
+    const { commands } = createExtension();
+    const { commandContext, notify } = createContext({
+      current: { tokens: 100, percent: 10 },
+    });
+
+    await commands.get("downshift")?.("help", commandContext);
+    expect(notify).toHaveBeenCalledWith(
+      expect.not.stringContaining("/downshift config"),
+      "info",
+    );
+
+    notify.mockClear();
+    await commands.get("downshift")?.("status", commandContext);
+    expect(notify).toHaveBeenCalledWith(
+      expect.not.stringContaining("/downshift config"),
+      "info",
     );
   });
 });

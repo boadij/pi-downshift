@@ -724,7 +724,7 @@ const STATUS_LINE_BUILDERS: Array<
   (config) => `upshift: ${yesNoMode(config?.upshiftAfterCompaction, "on")}`,
   (config) => `source: ${config?.premiumSource ?? "current"}`,
   () => `version: ${VERSION}`,
-  () => `commands: /downshift status | now | config | on | off | help`,
+  () => `commands: /downshift | status | now | on | off | help`,
 ];
 
 function formatOptionalRemaining(
