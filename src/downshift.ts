@@ -873,18 +873,19 @@ async function reconcileEnabledSession(
   const needsPremium =
     config.handoffBeforeDownshift ||
     !thresholdReached(ctx.getContextUsage(), config.threshold);
-  if (needsPremium) {
-    const premium = resolvePremiumTarget(config);
-    if (!premium) return pause(pi, ctx, "premium target is unset");
-    const switched = await switchToTarget(
-      pi,
-      ctx,
-      premium,
-      "premium",
-      "resumed",
-    );
-    if (!switched) return false;
+  if (!needsPremium) {
+    return switchToTarget(pi, ctx, config.economy, "economy", "resumed");
   }
+  const premium = resolvePremiumTarget(config);
+  if (!premium) return pause(pi, ctx, "premium target is unset");
+  const switched = await switchToTarget(
+    pi,
+    ctx,
+    premium,
+    "premium",
+    "resumed",
+  );
+  if (!switched) return false;
   await maybeDownshift(
     coreDeps(pi, ctx),
     runtime,

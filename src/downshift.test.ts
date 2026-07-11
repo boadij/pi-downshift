@@ -318,8 +318,61 @@ describe("downshift lifecycle adapter", () => {
     expect(latestState(extension.pi)).toMatchObject({
       paused: false,
       position: "economy",
+      handoff: "idle",
+    });
+  });
+
+  it("reconciles a changed economy target after disabling from economy", async () => {
+    setConfig({ handoffBeforeDownshift: false });
+    const fixture = createContext(
+      { current: { tokens: 100, percent: 60 } },
+      { model: models[0], thinkingLevel: "high" },
+    );
+    const extension = createExtension(fixture.active);
+
+    await extension.handlers
+      .get("session_start")
+      ?.({ reason: "new" }, fixture.context);
+    await extension.handlers.get("context")?.({}, fixture.context);
+    expect(extension.setModel).toHaveBeenLastCalledWith(models[2]);
+    expect(latestState(extension.pi)).toMatchObject({
+      paused: false,
+      position: "economy",
       handoff: "done",
     });
+
+    await extension.commands
+      .get("downshift")
+      ?.("off", fixture.commandContext);
+    expect(latestState(extension.pi)).toMatchObject({
+      sessionMode: "off",
+      position: "economy",
+    });
+
+    setConfig({
+      economy: target("economy-new", "medium"),
+      handoffBeforeDownshift: false,
+    });
+    extension.setModel.mockClear();
+    extension.setThinkingLevel.mockClear();
+
+    await extension.commands
+      .get("downshift")
+      ?.("on", fixture.commandContext);
+
+    expect(extension.setModel).toHaveBeenCalledOnce();
+    expect(extension.setModel).toHaveBeenCalledWith(models[3]);
+    expect(extension.setThinkingLevel).toHaveBeenCalledWith("medium");
+    expect(latestState(extension.pi)).toMatchObject({
+      sessionMode: "on",
+      paused: false,
+      position: "economy",
+      handoff: "idle",
+    });
+    expect(fixture.notify).toHaveBeenCalledWith(
+      "downshift on for this session",
+      "info",
+    );
   });
 
   it("establishes updated premium before handing off to updated economy", async () => {
