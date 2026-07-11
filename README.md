@@ -111,7 +111,9 @@ Disables Downshift for the current session.
 
 ### `/downshift on`
 
-Re-enables Downshift for the current session.
+Re-enables Downshift for the current session and reconciles the active model and thinking level with the latest configuration. Below the threshold, it activates the resolved premium target. At or above the threshold, it begins the configured transition to economy. When handoff notes are enabled, Downshift establishes premium before requesting the handoff and switches to economy after the handoff completes; otherwise, it switches directly to economy.
+
+Configuration edits are side-effect-free while Downshift is paused or disabled. Changing a model or threshold does not switch the active model until you run `/downshift on`.
 
 ### `/downshift help`
 

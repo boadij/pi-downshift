@@ -1,20 +1,14 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { Model, ThinkingLevel } from "@earendil-works/pi-ai";
 import type {
   ExtensionAPI,
   ExtensionCommandContext,
   ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
+import type { DownshiftConfig, DownshiftState } from "./downshift-core";
 
 const fsMocks = vi.hoisted(() => ({
-  config: {
-    enabled: true,
-    threshold: { percent: 50 },
-    economy: { provider: "test", model: "economy", thinkingLevel: "off" },
-    premiumSource: "current",
-    startOnPremium: false,
-    upshiftAfterCompaction: false,
-    handoffBeforeDownshift: true,
-  },
+  config: null as unknown,
   readFile: vi.fn(),
   writeFile: vi.fn(),
 }));
@@ -27,7 +21,7 @@ vi.mock("node:fs/promises", () => ({
 import downshift from "./downshift";
 
 type EventHandler = (
-  event: unknown,
+  event: any,
   ctx: ExtensionContext,
 ) => void | Promise<void>;
 
@@ -36,15 +30,64 @@ type CommandHandler = (
   ctx: ExtensionCommandContext,
 ) => void | Promise<void>;
 
+type ActiveTarget = {
+  model: Model<any>;
+  thinkingLevel: string;
+};
+
 type TestExtension = {
+  active: ActiveTarget;
   handlers: Map<string, EventHandler>;
   commands: Map<string, CommandHandler>;
   pi: ExtensionAPI;
+  setModel: ReturnType<typeof vi.fn>;
+  setThinkingLevel: ReturnType<typeof vi.fn>;
 };
 
-function createExtension(): TestExtension {
+const models = [
+  testModel("premium-old"),
+  testModel("premium-new"),
+  testModel("economy-old"),
+  testModel("economy-new"),
+];
+
+const defaultConfig: DownshiftConfig = {
+  enabled: true,
+  threshold: { percent: 50 },
+  economy: target("economy-old", "off"),
+  premiumSource: "current",
+  startOnPremium: false,
+  upshiftAfterCompaction: false,
+  handoffBeforeDownshift: true,
+};
+
+function testModel(id: string): Model<any> {
+  return { provider: "test", id, reasoning: true } as Model<any>;
+}
+
+function target(model: string, thinkingLevel: string) {
+  return { provider: "test", model, thinkingLevel };
+}
+
+function setConfig(patch: Partial<DownshiftConfig> = {}): void {
+  fsMocks.config = {
+    ...defaultConfig,
+    ...patch,
+    threshold: patch.threshold ?? defaultConfig.threshold,
+    economy: patch.economy ?? defaultConfig.economy,
+  } satisfies DownshiftConfig;
+}
+
+function createExtension(active: ActiveTarget): TestExtension {
   const handlers = new Map<string, EventHandler>();
   const commands = new Map<string, CommandHandler>();
+  const setModel = vi.fn(async (model: Model<any>) => {
+    active.model = model;
+    return true;
+  });
+  const setThinkingLevel = vi.fn((level: ThinkingLevel) => {
+    active.thinkingLevel = level;
+  });
   const pi = {
     on: (event: string, handler: EventHandler) => {
       handlers.set(event, handler);
@@ -54,23 +97,42 @@ function createExtension(): TestExtension {
     },
     appendEntry: vi.fn(),
     sendUserMessage: vi.fn(),
-    setModel: vi.fn(),
-    setThinkingLevel: vi.fn(),
+    setModel,
+    getThinkingLevel: () => active.thinkingLevel as ThinkingLevel,
+    setThinkingLevel,
   } as unknown as ExtensionAPI;
   downshift(pi);
-  return { handlers, commands, pi };
+  return { active, handlers, commands, pi, setModel, setThinkingLevel };
 }
 
-function createContext(usage: {
-  current: { tokens: number; percent: number };
-}) {
+function createContext(
+  usage: { current: { tokens: number; percent: number } },
+  active: ActiveTarget = {
+    model: models[0],
+    thinkingLevel: "off",
+  },
+) {
   const status = vi.fn();
   const select = vi.fn();
   const input = vi.fn();
   const notify = vi.fn();
   const ctx = {
     hasUI: true,
+    get model() {
+      return active.model;
+    },
     getContextUsage: () => usage.current,
+    isIdle: () => true,
+    modelRegistry: {
+      find: (provider: string, id: string) =>
+        models.find((model) => model.provider === provider && model.id === id),
+      refresh: vi.fn(),
+      getAvailable: () => models,
+    },
+    sessionManager: {
+      getEntries: () => [],
+      getSessionId: () => "test-session",
+    },
     ui: {
       setStatus: status,
       select,
@@ -79,6 +141,7 @@ function createContext(usage: {
     },
   };
   return {
+    active,
     commandContext: ctx as unknown as ExtensionCommandContext,
     context: ctx as unknown as ExtensionContext,
     input,
@@ -88,8 +151,28 @@ function createContext(usage: {
   };
 }
 
+function latestState(pi: ExtensionAPI): DownshiftState {
+  const appendEntry = vi.mocked(pi.appendEntry);
+  return appendEntry.mock.calls.at(-1)?.[1] as DownshiftState;
+}
+
+async function pauseDownshift(
+  extension: TestExtension,
+  context: ExtensionContext,
+): Promise<void> {
+  await extension.handlers.get("session_start")?.({ reason: "new" }, context);
+  await extension.handlers
+    .get("model_select")
+    ?.({ source: "cycle" }, context);
+  expect(latestState(extension.pi).paused).toBe(true);
+  extension.setModel.mockClear();
+  extension.setThinkingLevel.mockClear();
+  vi.mocked(extension.pi.sendUserMessage).mockClear();
+}
+
 describe("downshift lifecycle adapter", () => {
   beforeEach(() => {
+    setConfig();
     fsMocks.readFile.mockClear();
     fsMocks.writeFile.mockClear();
     fsMocks.readFile.mockImplementation(async () =>
@@ -100,18 +183,18 @@ describe("downshift lifecycle adapter", () => {
 
   it("refreshes status at turn_end and agent_settled without downshifting", async () => {
     const usage = { current: { tokens: 100, percent: 10 } };
-    const { handlers, pi } = createExtension();
-    const { context, status } = createContext(usage);
+    const fixture = createContext(usage);
+    const { handlers, pi } = createExtension(fixture.active);
 
-    await handlers.get("turn_end")?.({}, context);
-    expect(status).toHaveBeenLastCalledWith(
+    await handlers.get("turn_end")?.({}, fixture.context);
+    expect(fixture.status).toHaveBeenLastCalledWith(
       "downshift",
       "⇣ premium (40% left)",
     );
 
     usage.current = { tokens: 200, percent: 20 };
-    await handlers.get("agent_settled")?.({}, context);
-    expect(status).toHaveBeenLastCalledWith(
+    await handlers.get("agent_settled")?.({}, fixture.context);
+    expect(fixture.status).toHaveBeenLastCalledWith(
       "downshift",
       "⇣ premium (30% left)",
     );
@@ -120,42 +203,41 @@ describe("downshift lifecycle adapter", () => {
   });
 
   it("registers a thinking level select handler", () => {
-    const { handlers } = createExtension();
+    const fixture = createContext({ current: { tokens: 100, percent: 10 } });
+    const { handlers } = createExtension(fixture.active);
 
     expect(handlers.has("thinking_level_select")).toBe(true);
   });
 
   it("opens configuration for the bare command", async () => {
     const usage = { current: { tokens: 100, percent: 10 } };
-    const { commands } = createExtension();
-    const { commandContext, select, input, status } = createContext(usage);
-    select
+    const fixture = createContext(usage);
+    const { commands } = createExtension(fixture.active);
+    fixture.select
       .mockResolvedValueOnce("threshold: 50%")
       .mockResolvedValueOnce("percent")
       .mockResolvedValueOnce(undefined);
-    input.mockResolvedValueOnce("60");
+    fixture.input.mockResolvedValueOnce("60");
 
-    await commands.get("downshift")?.("", commandContext);
+    await commands.get("downshift")?.("", fixture.commandContext);
 
     expect(fsMocks.writeFile).toHaveBeenCalledOnce();
-    expect(status).toHaveBeenLastCalledWith(
+    expect(fixture.status).toHaveBeenLastCalledWith(
       "downshift",
       "⇣ premium (50% left)",
     );
     expect(fsMocks.writeFile.mock.invocationCallOrder[0]).toBeLessThan(
-      status.mock.invocationCallOrder[0],
+      fixture.status.mock.invocationCallOrder[0],
     );
   });
 
   it("warns with help for the unsupported config subcommand", async () => {
-    const { commands } = createExtension();
-    const { commandContext, notify } = createContext({
-      current: { tokens: 100, percent: 10 },
-    });
+    const fixture = createContext({ current: { tokens: 100, percent: 10 } });
+    const { commands } = createExtension(fixture.active);
 
-    await commands.get("downshift")?.("config", commandContext);
+    await commands.get("downshift")?.("config", fixture.commandContext);
 
-    expect(notify).toHaveBeenCalledWith(
+    expect(fixture.notify).toHaveBeenCalledWith(
       expect.stringContaining("/downshift - configure Downshift"),
       "warning",
     );
@@ -163,22 +245,323 @@ describe("downshift lifecycle adapter", () => {
   });
 
   it("does not advertise the unsupported config subcommand in help or status", async () => {
-    const { commands } = createExtension();
-    const { commandContext, notify } = createContext({
-      current: { tokens: 100, percent: 10 },
+    const fixture = createContext({ current: { tokens: 100, percent: 10 } });
+    const { commands } = createExtension(fixture.active);
+
+    await commands.get("downshift")?.("help", fixture.commandContext);
+    expect(fixture.notify).toHaveBeenCalledWith(
+      expect.not.stringContaining("/downshift config"),
+      "info",
+    );
+
+    fixture.notify.mockClear();
+    await commands.get("downshift")?.("status", fixture.commandContext);
+    expect(fixture.notify).toHaveBeenCalledWith(
+      expect.not.stringContaining("/downshift config"),
+      "info",
+    );
+  });
+
+  it("activates an updated explicit premium target below threshold", async () => {
+    setConfig({
+      premiumSource: "explicit",
+      premium: target("premium-new", "high"),
+    });
+    const fixture = createContext(
+      { current: { tokens: 100, percent: 10 } },
+      { model: models[0], thinkingLevel: "low" },
+    );
+    const extension = createExtension(fixture.active);
+    await pauseDownshift(extension, fixture.context);
+
+    await extension.commands
+      .get("downshift")
+      ?.("on", fixture.commandContext);
+
+    expect(extension.setModel).toHaveBeenCalledOnce();
+    expect(extension.setModel).toHaveBeenCalledWith(models[1]);
+    expect(extension.setThinkingLevel).toHaveBeenCalledOnce();
+    expect(extension.setThinkingLevel).toHaveBeenCalledWith("high");
+    expect(extension.pi.sendUserMessage).not.toHaveBeenCalled();
+    expect(latestState(extension.pi)).toMatchObject({
+      sessionMode: "on",
+      paused: false,
+      position: "premium",
+      handoff: "idle",
+    });
+    expect(fixture.notify).toHaveBeenCalledWith(
+      "downshift on for this session",
+      "info",
+    );
+  });
+
+  it("activates an updated economy target directly above threshold without handoff", async () => {
+    setConfig({
+      economy: target("economy-new", "medium"),
+      handoffBeforeDownshift: false,
+    });
+    const fixture = createContext(
+      { current: { tokens: 100, percent: 60 } },
+      { model: models[0], thinkingLevel: "low" },
+    );
+    const extension = createExtension(fixture.active);
+    await pauseDownshift(extension, fixture.context);
+
+    await extension.commands
+      .get("downshift")
+      ?.("on", fixture.commandContext);
+
+    expect(extension.setModel).toHaveBeenCalledOnce();
+    expect(extension.setModel).toHaveBeenCalledWith(models[3]);
+    expect(extension.setThinkingLevel).toHaveBeenCalledWith("medium");
+    expect(extension.pi.sendUserMessage).not.toHaveBeenCalled();
+    expect(latestState(extension.pi)).toMatchObject({
+      paused: false,
+      position: "economy",
+      handoff: "idle",
+    });
+  });
+
+  it("reconciles a changed economy target after disabling from economy", async () => {
+    setConfig({ handoffBeforeDownshift: false });
+    const fixture = createContext(
+      { current: { tokens: 100, percent: 60 } },
+      { model: models[0], thinkingLevel: "high" },
+    );
+    const extension = createExtension(fixture.active);
+
+    await extension.handlers
+      .get("session_start")
+      ?.({ reason: "new" }, fixture.context);
+    await extension.handlers.get("context")?.({}, fixture.context);
+    expect(extension.setModel).toHaveBeenLastCalledWith(models[2]);
+    expect(latestState(extension.pi)).toMatchObject({
+      paused: false,
+      position: "economy",
+      handoff: "done",
     });
 
-    await commands.get("downshift")?.("help", commandContext);
-    expect(notify).toHaveBeenCalledWith(
-      expect.not.stringContaining("/downshift config"),
+    await extension.commands
+      .get("downshift")
+      ?.("off", fixture.commandContext);
+    expect(latestState(extension.pi)).toMatchObject({
+      sessionMode: "off",
+      position: "economy",
+    });
+
+    setConfig({
+      economy: target("economy-new", "medium"),
+      handoffBeforeDownshift: false,
+    });
+    extension.setModel.mockClear();
+    extension.setThinkingLevel.mockClear();
+
+    await extension.commands
+      .get("downshift")
+      ?.("on", fixture.commandContext);
+
+    expect(extension.setModel).toHaveBeenCalledOnce();
+    expect(extension.setModel).toHaveBeenCalledWith(models[3]);
+    expect(extension.setThinkingLevel).toHaveBeenCalledWith("medium");
+    expect(latestState(extension.pi)).toMatchObject({
+      sessionMode: "on",
+      paused: false,
+      position: "economy",
+      handoff: "idle",
+    });
+    expect(fixture.notify).toHaveBeenCalledWith(
+      "downshift on for this session",
       "info",
+    );
+  });
+
+  it("establishes updated premium before handing off to updated economy", async () => {
+    setConfig({
+      premiumSource: "explicit",
+      premium: target("premium-new", "high"),
+      economy: target("economy-new", "off"),
+      handoffBeforeDownshift: true,
+    });
+    const fixture = createContext(
+      { current: { tokens: 100, percent: 60 } },
+      { model: models[0], thinkingLevel: "low" },
+    );
+    const extension = createExtension(fixture.active);
+    await pauseDownshift(extension, fixture.context);
+
+    await extension.commands
+      .get("downshift")
+      ?.("on", fixture.commandContext);
+
+    expect(extension.setModel).toHaveBeenCalledTimes(1);
+    expect(extension.setModel).toHaveBeenNthCalledWith(1, models[1]);
+    expect(extension.pi.sendUserMessage).toHaveBeenCalledOnce();
+    expect(latestState(extension.pi)).toMatchObject({
+      paused: false,
+      position: "premium",
+      handoff: "requested",
+    });
+
+    await extension.handlers
+      .get("before_agent_start")
+      ?.({ prompt: "<!-- downshift:handoff:v1 -->" }, fixture.context);
+    await extension.handlers.get("agent_end")?.({}, fixture.context);
+
+    expect(extension.setModel).toHaveBeenCalledTimes(2);
+    expect(extension.setModel).toHaveBeenNthCalledWith(2, models[3]);
+    expect(latestState(extension.pi)).toMatchObject({
+      paused: false,
+      position: "economy",
+      handoff: "done",
+    });
+  });
+
+  it("captures the complete current premium target without redundant changes", async () => {
+    setConfig({ premiumSource: "current" });
+    const fixture = createContext(
+      { current: { tokens: 100, percent: 10 } },
+      { model: models[0], thinkingLevel: "high" },
+    );
+    const extension = createExtension(fixture.active);
+    await pauseDownshift(extension, fixture.context);
+
+    await extension.commands
+      .get("downshift")
+      ?.("on", fixture.commandContext);
+
+    expect(extension.setModel).not.toHaveBeenCalled();
+    expect(extension.setThinkingLevel).not.toHaveBeenCalled();
+    expect(latestState(extension.pi)).toMatchObject({
+      paused: false,
+      position: "premium",
+      capturedPremium: target("premium-old", "high"),
+    });
+  });
+
+  it("is idempotent when repeatedly enabled on the configured target", async () => {
+    setConfig({
+      premiumSource: "explicit",
+      premium: target("premium-old", "high"),
+    });
+    const fixture = createContext(
+      { current: { tokens: 100, percent: 10 } },
+      { model: models[0], thinkingLevel: "high" },
+    );
+    const extension = createExtension(fixture.active);
+
+    await extension.commands
+      .get("downshift")
+      ?.("on", fixture.commandContext);
+    await extension.commands
+      .get("downshift")
+      ?.("on", fixture.commandContext);
+
+    expect(extension.setModel).not.toHaveBeenCalled();
+    expect(extension.setThinkingLevel).not.toHaveBeenCalled();
+    expect(extension.pi.sendUserMessage).not.toHaveBeenCalled();
+    expect(latestState(extension.pi)).toMatchObject({
+      paused: false,
+      position: "premium",
+      handoff: "idle",
+    });
+  });
+
+  it("stays paused without success when a required explicit premium is missing", async () => {
+    setConfig({
+      premiumSource: "explicit",
+      premium: undefined,
+      handoffBeforeDownshift: true,
+    });
+    const fixture = createContext({ current: { tokens: 100, percent: 10 } });
+    const extension = createExtension(fixture.active);
+
+    await extension.commands
+      .get("downshift")
+      ?.("on", fixture.commandContext);
+
+    expect(latestState(extension.pi)).toMatchObject({
+      paused: true,
+      lastError: "premium target is unset",
+    });
+    expect(fixture.notify).toHaveBeenCalledWith(
+      "downshift paused: premium target is unset",
+      "error",
+    );
+    expect(fixture.notify).not.toHaveBeenCalledWith(
+      "downshift on for this session",
+      "info",
+    );
+  });
+
+  it("stays paused without success when model activation has no API key", async () => {
+    setConfig({
+      premiumSource: "explicit",
+      premium: target("premium-new", "high"),
+    });
+    const fixture = createContext({ current: { tokens: 100, percent: 10 } });
+    const extension = createExtension(fixture.active);
+    extension.setModel.mockResolvedValueOnce(false);
+
+    await extension.commands
+      .get("downshift")
+      ?.("on", fixture.commandContext);
+
+    expect(latestState(extension.pi)).toMatchObject({
+      paused: true,
+      lastError: "no API key for test/premium-new",
+    });
+    expect(fixture.notify).not.toHaveBeenCalledWith(
+      "downshift on for this session",
+      "info",
+    );
+  });
+
+  it("suppresses internally emitted target events but pauses on later manual changes", async () => {
+    setConfig({
+      premiumSource: "explicit",
+      premium: target("premium-new", "high"),
+    });
+    const fixture = createContext(
+      { current: { tokens: 100, percent: 10 } },
+      { model: models[0], thinkingLevel: "low" },
+    );
+    const extension = createExtension(fixture.active);
+    extension.setModel.mockImplementationOnce(async (model: Model<any>) => {
+      const previousModel = fixture.active.model;
+      fixture.active.model = model;
+      await extension.handlers.get("model_select")?.(
+        { model, previousModel, source: "set" },
+        fixture.context,
+      );
+      return true;
+    });
+    extension.setThinkingLevel.mockImplementationOnce(
+      (level: ThinkingLevel) => {
+        const previousLevel = fixture.active.thinkingLevel;
+        fixture.active.thinkingLevel = level;
+        void extension.handlers.get("thinking_level_select")?.(
+          { level, previousLevel },
+          fixture.context,
+        );
+      },
     );
 
-    notify.mockClear();
-    await commands.get("downshift")?.("status", commandContext);
-    expect(notify).toHaveBeenCalledWith(
-      expect.not.stringContaining("/downshift config"),
-      "info",
-    );
+    await extension.commands
+      .get("downshift")
+      ?.("on", fixture.commandContext);
+
+    expect(latestState(extension.pi)).toMatchObject({
+      paused: false,
+      position: "premium",
+      lastError: undefined,
+    });
+
+    await extension.handlers
+      .get("thinking_level_select")
+      ?.({ level: "medium", previousLevel: "high" }, fixture.context);
+    expect(latestState(extension.pi)).toMatchObject({
+      paused: true,
+      lastError: "manual thinking level change",
+    });
   });
 });
