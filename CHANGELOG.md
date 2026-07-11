@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.1](https://github.com/boadij/pi-downshift/compare/v0.6.0...v0.6.1) (2026-07-11)
+
+
+### Bug Fixes
+
+* **commands:** reconcile targets when enabling downshift ([#25](https://github.com/boadij/pi-downshift/issues/25)) ([6d07ebb](https://github.com/boadij/pi-downshift/commit/6d07ebb97f01abbd7fcd3b2e32042a1741c949b2))
+
 ## [0.6.0](https://github.com/boadij/pi-downshift/compare/v0.5.0...v0.6.0) (2026-07-10)
 
 
