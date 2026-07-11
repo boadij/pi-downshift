@@ -148,14 +148,15 @@ async function getSelectableModels(
   return ctx.modelRegistry.getAvailable();
 }
 
-function getCurrentTarget(
+function getActiveTarget(
+  pi: Pick<ExtensionAPI, "getThinkingLevel">,
   ctx: Pick<ExtensionContext, "model">,
 ): ModelTarget | undefined {
   if (!ctx.model) return undefined;
   return {
     provider: ctx.model.provider,
     model: ctx.model.id,
-    thinkingLevel: "off",
+    thinkingLevel: pi.getThinkingLevel(),
   };
 }
 
@@ -230,14 +231,21 @@ async function switchToTarget(
   }
   try {
     internalTargetChange = true;
-    const ok = await pi.setModel(model);
-    if (!ok)
-      return pause(
-        pi,
-        ctx,
-        `no API key for ${target.provider}/${target.model}`,
-      );
-    pi.setThinkingLevel(target.thinkingLevel as ThinkingLevel);
+    const active = getActiveTarget(pi, ctx);
+    const modelChanged =
+      active?.provider !== target.provider || active.model !== target.model;
+    if (modelChanged) {
+      const ok = await pi.setModel(model);
+      if (!ok)
+        return pause(
+          pi,
+          ctx,
+          `no API key for ${target.provider}/${target.model}`,
+        );
+    }
+    if (pi.getThinkingLevel() !== target.thinkingLevel) {
+      pi.setThinkingLevel(target.thinkingLevel as ThinkingLevel);
+    }
     saveState(pi, { position, lastError: undefined });
     ctx.ui.notify(`downshift: ${reason} to ${targetLabel(target)}`, "info");
     return true;
@@ -816,26 +824,29 @@ async function enableSession(
   ctx: ExtensionCommandContext,
 ): Promise<void> {
   const config = await readConfig();
+  if (!config) {
+    updateStatus(ctx, config);
+    pause(pi, ctx, "config missing", {
+      sessionMode: "on",
+      handoff: "idle",
+      continueAfterHandoff: false,
+    });
+    return;
+  }
   saveState(pi, enabledSessionState(pi, ctx, config));
-  await maybeDownshift(
-    coreDeps(pi, ctx),
-    runtime,
-    ctx,
-    ctx.isIdle() ? "immediate" : "steer",
-  );
+  const reconciled = await reconcileEnabledSession(pi, ctx, config);
   updateStatus(ctx, config);
-  ctx.ui.notify("downshift on for this session", "info");
+  if (reconciled) ctx.ui.notify("downshift on for this session", "info");
 }
 
 function enabledSessionState(
   pi: ExtensionAPI,
   ctx: ExtensionCommandContext,
-  config: DownshiftConfig | undefined,
+  config: DownshiftConfig,
 ): Partial<DownshiftState> {
   return {
     sessionMode: "on",
     paused: false,
-    position: "premium",
     lastError: undefined,
     handoff: "idle",
     continueAfterHandoff: false,
@@ -846,12 +857,41 @@ function enabledSessionState(
 function capturedPremiumForEnable(
   pi: ExtensionAPI,
   ctx: ExtensionCommandContext,
-  config: DownshiftConfig | undefined,
+  config: DownshiftConfig,
 ): ModelTarget | undefined {
-  const current = getCurrentTarget(ctx);
-  if (config?.premiumSource !== "current" || !current)
+  const current = getActiveTarget(pi, ctx);
+  if (config.premiumSource !== "current" || !current)
     return runtime.state.capturedPremium;
-  return { ...current, thinkingLevel: pi.getThinkingLevel() };
+  return current;
+}
+
+async function reconcileEnabledSession(
+  pi: ExtensionAPI,
+  ctx: ExtensionCommandContext,
+  config: DownshiftConfig,
+): Promise<boolean> {
+  const needsPremium =
+    config.handoffBeforeDownshift ||
+    !thresholdReached(ctx.getContextUsage(), config.threshold);
+  if (needsPremium) {
+    const premium = resolvePremiumTarget(config);
+    if (!premium) return pause(pi, ctx, "premium target is unset");
+    const switched = await switchToTarget(
+      pi,
+      ctx,
+      premium,
+      "premium",
+      "resumed",
+    );
+    if (!switched) return false;
+  }
+  await maybeDownshift(
+    coreDeps(pi, ctx),
+    runtime,
+    ctx,
+    ctx.isIdle() ? "immediate" : "steer",
+  );
+  return !runtime.state.paused;
 }
 
 async function handleSessionStart(
@@ -871,8 +911,8 @@ async function initializeSessionState(
   ctx: ExtensionContext,
   config: DownshiftConfig | undefined,
 ): Promise<void> {
-  const current = getCurrentTarget(ctx);
-  runtime.state = initialSessionState(ctx, current, pi.getThinkingLevel());
+  const current = getActiveTarget(pi, ctx);
+  runtime.state = initialSessionState(ctx, current);
   saveState(pi);
   if (shouldStartOnPremium(config, event, ctx)) {
     await switchToTarget(pi, ctx, config.premium, "premium", "started");
@@ -882,7 +922,6 @@ async function initializeSessionState(
 function initialSessionState(
   ctx: ExtensionContext,
   current: ModelTarget | undefined,
-  thinkingLevel: string,
 ): DownshiftState {
   return {
     sessionId: ctx.sessionManager.getSessionId(),
@@ -891,7 +930,7 @@ function initialSessionState(
     position: "premium",
     handoff: "idle",
     continueAfterHandoff: false,
-    capturedPremium: current ? { ...current, thinkingLevel } : undefined,
+    capturedPremium: current,
   };
 }
 
