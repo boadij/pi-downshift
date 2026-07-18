@@ -46,6 +46,7 @@ This keeps Downshift simple: premium handles orientation, economy handles contin
 - Switches to a configured economy model after a token or percent threshold
 - Supports token thresholds, percent thresholds, or both
 - Remembers whether the session is premium, economy, paused, or mid-handoff
+- Restores the premium/economy phase for the active session-tree branch after navigation and existing-session restoration
 - Pauses automatically after manual model changes
 - Optionally switches back to premium after successful compaction, even while immediate post-compaction usage telemetry is still unknown
 - Shows a compact status indicator in the UI
@@ -59,6 +60,12 @@ It does not run complex routing rules.
 It does not try to be clever.
 
 It is a deterministic context-cost governor.
+
+## Session trees and forks 🌳
+
+Downshift associates the premium or economy phase with the active session-tree branch. After `/tree` navigation, it restores that branch's phase and reconciles both the model and thinking level without evaluating the context threshold or creating a handoff. Reloading, resuming, forking, and cloning an existing Downshift session use the same restoration behavior.
+
+Session-level enablement and safety pauses remain active across branches. Navigating to a branch does not clear `/downshift off`, a manual-change pause, or a captured premium target.
 
 ## Install 📦
 

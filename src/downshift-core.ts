@@ -52,6 +52,12 @@ type PersistedStateEntry = {
   data?: unknown;
 };
 
+export type RestoredBranchPhase = {
+  position: Position;
+  handoff: "idle" | "done";
+  interrupted: boolean;
+};
+
 export type Runtime = { state: DownshiftState };
 
 export type HandoffDelivery = "immediate" | "steer";
@@ -69,6 +75,7 @@ export type CoreDeps = {
     position: Position,
     reason: string,
   ) => Promise<boolean>;
+  getActiveTarget: () => ModelTarget | undefined;
   updateStatus: (config?: DownshiftConfig) => void;
   notify: (message: string, level?: string) => void;
 };
@@ -129,7 +136,7 @@ function parseStateEntry(entry: PersistedStateEntry): StateEntry | undefined {
 function restoredState(data: StateEntry, sessionId: string): DownshiftState {
   const interrupted = data.handoff === "requested" || data.handoff === "active";
   return {
-    sessionId: typeof data.sessionId === "string" ? data.sessionId : sessionId,
+    sessionId,
     sessionMode: restoredSessionMode(data),
     paused: interrupted || data.paused === true,
     position: data.position === "economy" ? "economy" : "premium",
@@ -138,6 +145,24 @@ function restoredState(data: StateEntry, sessionId: string): DownshiftState {
     capturedPremium: parseTarget(data.capturedPremium),
     lastError: restoredLastError(data, interrupted),
   };
+}
+
+export function restoreBranchPhaseFromEntries(
+  entries: PersistedStateEntry[],
+): RestoredBranchPhase {
+  for (let index = entries.length - 1; index >= 0; index -= 1) {
+    const data = parseStateEntry(entries[index]);
+    if (!data) continue;
+
+    const position: Position = data.position === "economy" ? "economy" : "premium";
+    const interrupted = data.handoff === "requested" || data.handoff === "active";
+    return {
+      position,
+      handoff: position === "economy" ? "done" : "idle",
+      interrupted,
+    };
+  }
+  return { position: "premium", handoff: "idle", interrupted: false };
 }
 
 function restoredSessionMode(data: StateEntry): SessionMode {
@@ -463,6 +488,50 @@ function resolvePremium(
   return config.premiumSource === "explicit"
     ? config.premium
     : state.capturedPremium;
+}
+
+function targetsEqual(
+  left: ModelTarget | undefined,
+  right: ModelTarget,
+): boolean {
+  return (
+    left?.provider === right.provider &&
+    left.model === right.model &&
+    left.thinkingLevel === right.thinkingLevel
+  );
+}
+
+export async function reconcilePositionTarget(
+  deps: CoreDeps,
+  runtime: Runtime,
+  reason: string,
+): Promise<DownshiftState> {
+  const config = await deps.readConfig();
+
+  if (
+    !isDownshiftEnabled(config, runtime.state) ||
+    runtime.state.paused ||
+    hasPendingHandoff(runtime.state)
+  ) {
+    deps.updateStatus(config);
+    return runtime.state;
+  }
+
+  const expectedTarget =
+    runtime.state.position === "economy"
+      ? config.economy
+      : resolvePremium(config, runtime.state);
+  if (!expectedTarget) {
+    pauseForMissingPremium(deps, runtime);
+    deps.updateStatus(config);
+    return runtime.state;
+  }
+
+  if (!targetsEqual(deps.getActiveTarget(), expectedTarget)) {
+    await deps.switchToTarget(expectedTarget, runtime.state.position, reason);
+  }
+  deps.updateStatus(config);
+  return runtime.state;
 }
 
 function pauseForMissingPremium(deps: CoreDeps, runtime: Runtime): void {

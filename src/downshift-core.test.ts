@@ -9,6 +9,8 @@ import {
   handleManualThinkingLevelSelect,
   maybeDownshift,
   maybeUpshiftAfterCompaction,
+  reconcilePositionTarget,
+  restoreBranchPhaseFromEntries,
   restoreStateFromEntries,
   statusText,
   thresholdReached,
@@ -55,6 +57,7 @@ type TestDeps = {
       reason: string,
     ) => Promise<boolean>
   >;
+  getActiveTarget: Mock<() => ModelTarget | undefined>;
   updateStatus: Mock<() => void>;
   notify: Mock<(message: string, level?: string) => void>;
 };
@@ -65,6 +68,7 @@ function createDeps(config = baseConfig): TestDeps {
     saveState: vi.fn(),
     sendUserMessage: vi.fn(async () => undefined),
     switchToTarget: vi.fn(async () => true),
+    getActiveTarget: vi.fn(() => undefined),
     updateStatus: vi.fn(),
     notify: vi.fn(),
   };
@@ -147,6 +151,125 @@ describe("downshift core", () => {
   function createEconomyRuntime() {
     return { state: createState({ position: "economy" }) };
   }
+
+  describe("restoreBranchPhaseFromEntries", () => {
+    it("defaults to premium and idle without a state entry", () => {
+      expect(restoreBranchPhaseFromEntries([])).toEqual({
+        position: "premium",
+        handoff: "idle",
+        interrupted: false,
+      });
+    });
+
+    it("ignores non-Downshift and invalid entries", () => {
+      expect(
+        restoreBranchPhaseFromEntries([
+          { type: "message", data: {} },
+          { type: "custom", customType: "downshift-state", data: "invalid" },
+        ]),
+      ).toEqual({
+        position: "premium",
+        handoff: "idle",
+        interrupted: false,
+      });
+    });
+
+    it("uses the newest valid state on the branch", () => {
+      expect(
+        restoreBranchPhaseFromEntries([
+          {
+            type: "custom",
+            customType: "downshift-state",
+            data: { position: "economy", handoff: "done" },
+          },
+          {
+            type: "custom",
+            customType: "downshift-state",
+            data: { position: "premium", handoff: "done" },
+          },
+        ]),
+      ).toEqual({
+        position: "premium",
+        handoff: "idle",
+        interrupted: false,
+      });
+    });
+
+    it("restores premium as idle", () => {
+      expect(
+        restoreBranchPhaseFromEntries([
+          {
+            type: "custom",
+            customType: "downshift-state",
+            data: { position: "premium", handoff: "done" },
+          },
+        ]),
+      ).toEqual({
+        position: "premium",
+        handoff: "idle",
+        interrupted: false,
+      });
+    });
+
+    it("restores economy as done", () => {
+      expect(
+        restoreBranchPhaseFromEntries([
+          {
+            type: "custom",
+            customType: "downshift-state",
+            data: { position: "economy", handoff: "idle" },
+          },
+        ]),
+      ).toEqual({
+        position: "economy",
+        handoff: "done",
+        interrupted: false,
+      });
+    });
+
+    it.each(["requested", "active"] as const)(
+      "marks a %s handoff as interrupted and normalizes it",
+      (handoff) => {
+        expect(
+          restoreBranchPhaseFromEntries([
+            {
+              type: "custom",
+              customType: "downshift-state",
+              data: { position: "premium", handoff, continueAfterHandoff: true },
+            },
+          ]),
+        ).toEqual({
+          position: "premium",
+          handoff: "idle",
+          interrupted: true,
+        });
+      },
+    );
+
+    it("does not restore continuation or session-wide fields", () => {
+      expect(
+        restoreBranchPhaseFromEntries([
+          {
+            type: "custom",
+            customType: "downshift-state",
+            data: {
+              position: "economy",
+              handoff: "done",
+              continueAfterHandoff: true,
+              sessionMode: "off",
+              paused: true,
+              capturedPremium: premium,
+              lastError: "manual model change",
+            },
+          },
+        ]),
+      ).toEqual({
+        position: "economy",
+        handoff: "done",
+        interrupted: false,
+      });
+    });
+  });
 
   it("formats premium status with remaining token and percent budget", () => {
     expect(
@@ -562,6 +685,141 @@ describe("downshift core", () => {
     });
   });
 
+  describe("reconcilePositionTarget", () => {
+    it("selects the configured economy target for economy position", async () => {
+      const deps = createDeps();
+      deps.getActiveTarget.mockReturnValue(premium);
+      const runtime = { state: createState({ position: "economy" }) };
+
+      await reconcilePositionTarget(deps, runtime, "restored branch");
+
+      expect(deps.switchToTarget).toHaveBeenCalledWith(
+        economy,
+        "economy",
+        "restored branch",
+      );
+    });
+
+    it("selects an explicit premium target for premium position", async () => {
+      const config = { ...baseConfig, premiumSource: "explicit" as const, premium };
+      const deps = createDeps(config);
+      deps.getActiveTarget.mockReturnValue(economy);
+      const runtime = { state: createState() };
+
+      await reconcilePositionTarget(deps, runtime, "restored session");
+
+      expect(deps.switchToTarget).toHaveBeenCalledWith(
+        premium,
+        "premium",
+        "restored session",
+      );
+    });
+
+    it("selects the captured premium target for current premium source", async () => {
+      const deps = createDeps();
+      deps.getActiveTarget.mockReturnValue(economy);
+      const runtime = { state: createState({ capturedPremium: premium }) };
+
+      await reconcilePositionTarget(deps, runtime, "restored session");
+
+      expect(deps.switchToTarget).toHaveBeenCalledWith(
+        premium,
+        "premium",
+        "restored session",
+      );
+    });
+
+    it("does not switch or persist when the complete target matches", async () => {
+      const config = {
+        ...baseConfig,
+        premiumSource: "explicit" as const,
+        premium,
+      };
+      const deps = createDeps(config);
+      deps.getActiveTarget.mockReturnValue(premium);
+      const runtime = { state: createState() };
+
+      await reconcilePositionTarget(deps, runtime, "restored branch");
+
+      expect(deps.switchToTarget).not.toHaveBeenCalled();
+      expect(deps.saveState).not.toHaveBeenCalled();
+      expect(deps.notify).not.toHaveBeenCalled();
+      expect(deps.updateStatus).toHaveBeenCalledWith(config);
+    });
+
+    it.each([
+      ["thinking level", premium, { ...premium, thinkingLevel: "high" }],
+      ["model", premium, { ...premium, model: "premium-new" }],
+    ] as const)("switches for a %s-only mismatch", async (_kind, expected, active) => {
+      const config = {
+        ...baseConfig,
+        premiumSource: "explicit" as const,
+        premium: expected,
+      };
+      const deps = createDeps(config);
+      deps.getActiveTarget.mockReturnValue(active);
+      const runtime = { state: createState() };
+
+      await reconcilePositionTarget(deps, runtime, "restored branch");
+
+      expect(deps.switchToTarget).toHaveBeenCalledWith(
+        expected,
+        "premium",
+        "restored branch",
+      );
+      expect(deps.sendUserMessage).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      ["disabled config", { ...baseConfig, enabled: false }, createState()],
+      ["off session", baseConfig, createState({ sessionMode: "off" })],
+      ["paused runtime", baseConfig, createState({ paused: true })],
+      ["pending handoff", baseConfig, createState({ handoff: "requested" })],
+    ] as const)("does not switch for %s", async (_name, config, state) => {
+      const deps = createDeps(config);
+      deps.getActiveTarget.mockReturnValue(economy);
+      const runtime = { state };
+
+      await reconcilePositionTarget(deps, runtime, "restored branch");
+
+      expect(deps.switchToTarget).not.toHaveBeenCalled();
+      expect(deps.sendUserMessage).not.toHaveBeenCalled();
+    });
+
+    it("pauses when the premium target is missing", async () => {
+      const config = {
+        ...baseConfig,
+        premiumSource: "explicit" as const,
+        premium: undefined,
+      };
+      const deps = createDeps(config);
+      const runtime = { state: createState() };
+
+      await reconcilePositionTarget(deps, runtime, "restored session");
+
+      expect(runtime.state.paused).toBe(true);
+      expect(runtime.state.lastError).toBe("premium target is unset");
+      expect(deps.switchToTarget).not.toHaveBeenCalled();
+      expect(deps.sendUserMessage).not.toHaveBeenCalled();
+    });
+
+    it("returns the current runtime state after a successful switch", async () => {
+      const config = {
+        ...baseConfig,
+        premiumSource: "explicit" as const,
+        premium,
+      };
+      const deps = createDeps(config);
+      deps.getActiveTarget.mockReturnValue(economy);
+      const runtime = { state: createState() };
+
+      const result = await reconcilePositionTarget(deps, runtime, "restored session");
+
+      expect(result).toBe(runtime.state);
+      expect(deps.updateStatus).toHaveBeenCalledWith(config);
+    });
+  });
+
   it("restores interrupted handoff as paused instead of stranded", () => {
     for (const handoff of ["requested", "active"] as const) {
       const restored = restoreStateFromEntries(
@@ -601,6 +859,21 @@ describe("downshift core", () => {
 
     expect(restored?.position).toBe("economy");
     expect(restored?.paused).toBe(true);
+  });
+
+  it("uses the current session ID instead of a persisted parent ID", () => {
+    const restored = restoreStateFromEntries(
+      [
+        {
+          type: "custom",
+          customType: "downshift-state",
+          data: { ...createState(), sessionId: "parent-session" },
+        },
+      ],
+      "current-session",
+    );
+
+    expect(restored?.sessionId).toBe("current-session");
   });
 
   it("restores legacy session flags", () => {
