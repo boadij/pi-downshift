@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.2](https://github.com/boadij/pi-downshift/compare/v0.6.1...v0.6.2) (2026-07-20)
+
+
+### Bug Fixes
+
+* **session:** reconcile models after branch navigation ([#27](https://github.com/boadij/pi-downshift/issues/27)) ([6cceea7](https://github.com/boadij/pi-downshift/commit/6cceea72a2350c52e8e172a4a2cadf04dd2d2e46))
+
 ## [0.6.1](https://github.com/boadij/pi-downshift/compare/v0.6.0...v0.6.1) (2026-07-11)
 
 
