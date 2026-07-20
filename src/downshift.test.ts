@@ -111,6 +111,8 @@ function createContext(
     model: models[0],
     thinkingLevel: "off",
   },
+  sessionEntries: unknown[] = [],
+  branchEntries: unknown[] = [],
 ) {
   const status = vi.fn();
   const select = vi.fn();
@@ -130,7 +132,8 @@ function createContext(
       getAvailable: () => models,
     },
     sessionManager: {
-      getEntries: () => [],
+      getEntries: () => sessionEntries,
+      getBranch: () => branchEntries,
       getSessionId: () => "test-session",
     },
     ui: {
@@ -207,6 +210,535 @@ describe("downshift lifecycle adapter", () => {
     const { handlers } = createExtension(fixture.active);
 
     expect(handlers.has("thinking_level_select")).toBe(true);
+  });
+
+  it("registers a session tree handler", () => {
+    const fixture = createContext({ current: { tokens: 100, percent: 10 } });
+    const { handlers } = createExtension(fixture.active);
+
+    expect(handlers.has("session_tree")).toBe(true);
+  });
+
+  it("reconciles the active branch phase after tree navigation", async () => {
+    setConfig({
+      premiumSource: "explicit",
+      premium: target("premium-new", "high"),
+      handoffBeforeDownshift: false,
+    });
+    const sessionEntries = [
+      {
+        type: "custom",
+        customType: "downshift-state",
+        data: {
+          sessionId: "parent-session",
+          sessionMode: "inherit",
+          paused: false,
+          position: "economy",
+          handoff: "done",
+        },
+      },
+    ];
+    const branchEntries = [
+      {
+        type: "custom",
+        customType: "downshift-state",
+        data: { position: "economy", handoff: "done" },
+      },
+    ];
+    const fixture = createContext(
+      { current: { tokens: 100, percent: 10 } },
+      { model: models[2], thinkingLevel: "off" },
+      sessionEntries,
+      branchEntries,
+    );
+    const extension = createExtension(fixture.active);
+
+    await extension.handlers
+      .get("session_start")
+      ?.({ reason: "resume" }, fixture.context);
+    expect(extension.setModel).not.toHaveBeenCalled();
+
+    branchEntries.splice(0, branchEntries.length, {
+      type: "custom",
+      customType: "downshift-state",
+      data: { position: "premium", handoff: "done" },
+    });
+    await extension.handlers.get("session_tree")?.({}, fixture.context);
+
+    expect(extension.setModel).toHaveBeenCalledOnce();
+    expect(extension.setModel).toHaveBeenCalledWith(models[1]);
+    expect(extension.setThinkingLevel).toHaveBeenCalledWith("high");
+    expect(extension.pi.sendUserMessage).not.toHaveBeenCalled();
+    expect(fixture.notify).toHaveBeenCalledWith(
+      "downshift: restored branch to test/premium-new:high",
+      "info",
+    );
+  });
+
+  it("reconciles from a premium branch to an economy branch", async () => {
+    setConfig({
+      premiumSource: "explicit",
+      premium: target("premium-new", "high"),
+      handoffBeforeDownshift: false,
+    });
+    const premiumEntry = {
+      type: "custom",
+      customType: "downshift-state",
+      data: { position: "premium", handoff: "idle" },
+    };
+    const economyEntry = {
+      type: "custom",
+      customType: "downshift-state",
+      data: { position: "economy", handoff: "done" },
+    };
+    const fixture = createContext(
+      { current: { tokens: 100, percent: 10 } },
+      { model: models[1], thinkingLevel: "high" },
+      [premiumEntry],
+      [premiumEntry],
+    );
+    const extension = createExtension(fixture.active);
+
+    await extension.handlers
+      .get("session_start")
+      ?.({ reason: "resume" }, fixture.context);
+    fixture.context.sessionManager.getBranch = () => [economyEntry] as any;
+
+    await extension.handlers.get("session_tree")?.({}, fixture.context);
+
+    expect(extension.setModel).toHaveBeenCalledWith(models[2]);
+    expect(extension.setThinkingLevel).toHaveBeenCalledWith("off");
+    expect(extension.pi.sendUserMessage).not.toHaveBeenCalled();
+    expect(latestState(extension.pi)).toMatchObject({
+      position: "economy",
+      handoff: "done",
+      continueAfterHandoff: false,
+    });
+  });
+
+  it("pauses when a source handoff is pending during tree navigation", async () => {
+    setConfig({ handoffBeforeDownshift: true });
+    const premiumEntry = {
+      type: "custom",
+      customType: "downshift-state",
+      data: { position: "premium", handoff: "idle" },
+    };
+    const economyEntry = {
+      type: "custom",
+      customType: "downshift-state",
+      data: { position: "economy", handoff: "done" },
+    };
+    const fixture = createContext(
+      { current: { tokens: 100, percent: 10 } },
+      { model: models[0], thinkingLevel: "off" },
+      [premiumEntry],
+      [premiumEntry],
+    );
+    const extension = createExtension(fixture.active);
+
+    await extension.handlers
+      .get("session_start")
+      ?.({ reason: "resume" }, fixture.context);
+    await extension.commands.get("downshift")?.("now", fixture.commandContext);
+    extension.setModel.mockClear();
+    extension.setThinkingLevel.mockClear();
+    vi.mocked(extension.pi.sendUserMessage).mockClear();
+    fixture.context.sessionManager.getBranch = () => [economyEntry] as any;
+
+    await extension.handlers.get("session_tree")?.({}, fixture.context);
+
+    expect(latestState(extension.pi)).toMatchObject({
+      paused: true,
+      handoff: "done",
+      continueAfterHandoff: false,
+      lastError: "handoff interrupted by tree navigation",
+    });
+    expect(extension.setModel).not.toHaveBeenCalled();
+    expect(extension.setThinkingLevel).not.toHaveBeenCalled();
+    expect(extension.pi.sendUserMessage).not.toHaveBeenCalled();
+  });
+
+  it.each(["requested", "active"] as const)(
+    "pauses when the destination has an interrupted %s handoff",
+    async (handoff) => {
+      setConfig({ handoffBeforeDownshift: true });
+      const premiumEntry = {
+        type: "custom",
+        customType: "downshift-state",
+        data: { position: "premium", handoff: "idle" },
+      };
+      const interruptedEntry = {
+        type: "custom",
+        customType: "downshift-state",
+        data: { position: "premium", handoff },
+      };
+      const fixture = createContext(
+        { current: { tokens: 100, percent: 10 } },
+        { model: models[0], thinkingLevel: "off" },
+        [premiumEntry],
+        [premiumEntry],
+      );
+      const extension = createExtension(fixture.active);
+
+      await extension.handlers
+        .get("session_start")
+        ?.({ reason: "resume" }, fixture.context);
+      extension.setModel.mockClear();
+      extension.setThinkingLevel.mockClear();
+      vi.mocked(extension.pi.sendUserMessage).mockClear();
+      fixture.context.sessionManager.getBranch = () => [interruptedEntry] as any;
+
+      await extension.handlers.get("session_tree")?.({}, fixture.context);
+
+      expect(latestState(extension.pi)).toMatchObject({
+        paused: true,
+        handoff: "idle",
+        continueAfterHandoff: false,
+        lastError: "handoff interrupted by tree navigation",
+      });
+      expect(extension.setModel).not.toHaveBeenCalled();
+      expect(extension.setThinkingLevel).not.toHaveBeenCalled();
+      expect(extension.pi.sendUserMessage).not.toHaveBeenCalled();
+    },
+  );
+
+  it("defaults an untracked branch to premium after tree navigation", async () => {
+    setConfig({
+      premiumSource: "explicit",
+      premium: target("premium-new", "high"),
+      handoffBeforeDownshift: false,
+    });
+    const sessionEntries = [
+      {
+        type: "custom",
+        customType: "downshift-state",
+        data: { position: "economy", handoff: "done" },
+      },
+    ];
+    const fixture = createContext(
+      { current: { tokens: 100, percent: 10 } },
+      { model: models[2], thinkingLevel: "off" },
+      sessionEntries,
+      [
+        {
+          type: "custom",
+          customType: "downshift-state",
+          data: { position: "economy", handoff: "done" },
+        },
+      ],
+    );
+    const extension = createExtension(fixture.active);
+
+    await extension.handlers
+      .get("session_start")
+      ?.({ reason: "resume" }, fixture.context);
+    fixture.active.model = models[2];
+    fixture.active.thinkingLevel = "off";
+    extension.setModel.mockClear();
+    extension.setThinkingLevel.mockClear();
+
+    const branch = fixture.context.sessionManager.getBranch() as unknown[];
+    branch.splice(0, branch.length);
+
+    await extension.handlers.get("session_tree")?.({}, fixture.context);
+
+    expect(extension.setModel).toHaveBeenCalledWith(models[1]);
+    expect(extension.setThinkingLevel).toHaveBeenCalledWith("high");
+    expect(extension.pi.sendUserMessage).not.toHaveBeenCalled();
+  });
+
+  it.each(["reload", "resume", "fork", "clone"])(
+    "reconciles an existing branch during %s session start",
+    async (reason) => {
+      setConfig({
+        premiumSource: "explicit",
+        premium: target("premium-new", "high"),
+        handoffBeforeDownshift: false,
+      });
+      const stateEntry = {
+        type: "custom",
+        customType: "downshift-state",
+        data: { sessionId: "parent-session", position: "premium", handoff: "idle" },
+      };
+      const fixture = createContext(
+        { current: { tokens: 100, percent: 90 } },
+        { model: models[2], thinkingLevel: "off" },
+        [stateEntry],
+        [stateEntry],
+      );
+      const extension = createExtension(fixture.active);
+
+      await extension.handlers.get("session_start")?.(
+        { reason } as any,
+        fixture.context,
+      );
+
+      expect(extension.setModel).toHaveBeenCalledWith(models[1]);
+      expect(extension.setThinkingLevel).toHaveBeenCalledWith("high");
+      expect(extension.pi.sendUserMessage).not.toHaveBeenCalled();
+      expect(fixture.notify).not.toHaveBeenCalledWith(
+        expect.stringContaining("preparing handoff"),
+        expect.anything(),
+      );
+    },
+  );
+
+  it("keeps fresh session startup behavior when no state exists", async () => {
+    setConfig({
+      premiumSource: "explicit",
+      premium: target("premium-new", "high"),
+      startOnPremium: true,
+    });
+    const fixture = createContext(
+      { current: { tokens: 100, percent: 10 } },
+      { model: models[0], thinkingLevel: "off" },
+    );
+    const extension = createExtension(fixture.active);
+
+    await extension.handlers
+      .get("session_start")
+      ?.({ reason: "new" }, fixture.context);
+
+    expect(extension.setModel).toHaveBeenCalledWith(models[1]);
+    expect(extension.setThinkingLevel).toHaveBeenCalledWith("high");
+  });
+
+  it.each([
+    ["disabled", { enabled: false }, { sessionMode: "inherit" }],
+    ["off", {}, { sessionMode: "off" }],
+    ["paused", {}, { paused: true }],
+  ] as const)("does not switch a %s destination branch", async (_name, configPatch, statePatch) => {
+    setConfig({
+      ...configPatch,
+      premiumSource: "explicit",
+      premium: target("premium-new", "high"),
+      handoffBeforeDownshift: false,
+    });
+    const stateEntry = {
+      type: "custom",
+      customType: "downshift-state",
+      data: { position: "economy", handoff: "done", ...statePatch },
+    };
+    const destinationEntry = {
+      type: "custom",
+      customType: "downshift-state",
+      data: { position: "premium", handoff: "idle" },
+    };
+    const fixture = createContext(
+      { current: { tokens: 100, percent: 10 } },
+      { model: models[2], thinkingLevel: "off" },
+      [stateEntry],
+      [destinationEntry],
+    );
+    const extension = createExtension(fixture.active);
+
+    await extension.handlers
+      .get("session_start")
+      ?.({ reason: "resume" }, fixture.context);
+    extension.setModel.mockClear();
+    extension.setThinkingLevel.mockClear();
+    vi.mocked(extension.pi.sendUserMessage).mockClear();
+
+    await extension.handlers.get("session_tree")?.({}, fixture.context);
+
+    expect(extension.setModel).not.toHaveBeenCalled();
+    expect(extension.setThinkingLevel).not.toHaveBeenCalled();
+    expect(extension.pi.sendUserMessage).not.toHaveBeenCalled();
+    if (_name === "paused") {
+      expect(fixture.status).toHaveBeenLastCalledWith("downshift", "⇣ paused");
+    }
+  });
+
+  it("does not generate a handoff while restoring a branch", async () => {
+    setConfig({
+      premiumSource: "explicit",
+      premium: target("premium-new", "high"),
+      handoffBeforeDownshift: true,
+    });
+    const economyEntry = {
+      type: "custom",
+      customType: "downshift-state",
+      data: { position: "economy", handoff: "done" },
+    };
+    const premiumEntry = {
+      type: "custom",
+      customType: "downshift-state",
+      data: { position: "premium", handoff: "idle" },
+    };
+    const fixture = createContext(
+      { current: { tokens: 100, percent: 90 } },
+      { model: models[2], thinkingLevel: "off" },
+      [economyEntry],
+      [economyEntry],
+    );
+    const extension = createExtension(fixture.active);
+
+    await extension.handlers
+      .get("session_start")
+      ?.({ reason: "resume" }, fixture.context);
+    fixture.context.sessionManager.getBranch = () => [premiumEntry] as any;
+
+    await extension.handlers.get("session_tree")?.({}, fixture.context);
+
+    expect(extension.setModel).toHaveBeenCalledWith(models[1]);
+    expect(extension.pi.sendUserMessage).not.toHaveBeenCalled();
+  });
+
+  it("preserves internal target changes during branch reconciliation", async () => {
+    setConfig({
+      premiumSource: "explicit",
+      premium: target("premium-new", "high"),
+      handoffBeforeDownshift: false,
+    });
+    const economyEntry = {
+      type: "custom",
+      customType: "downshift-state",
+      data: { position: "economy", handoff: "done" },
+    };
+    const premiumEntry = {
+      type: "custom",
+      customType: "downshift-state",
+      data: { position: "premium", handoff: "idle" },
+    };
+    const fixture = createContext(
+      { current: { tokens: 100, percent: 90 } },
+      { model: models[2], thinkingLevel: "off" },
+      [economyEntry],
+      [economyEntry],
+    );
+    const extension = createExtension(fixture.active);
+    extension.setModel.mockImplementationOnce(async (model: Model<any>) => {
+      const previousModel = fixture.active.model;
+      fixture.active.model = model;
+      await extension.handlers.get("model_select")?.(
+        { model, previousModel, source: "set" },
+        fixture.context,
+      );
+      return true;
+    });
+    extension.setThinkingLevel.mockImplementationOnce((level: ThinkingLevel) => {
+      const previousLevel = fixture.active.thinkingLevel;
+      fixture.active.thinkingLevel = level;
+      void extension.handlers.get("thinking_level_select")?.(
+        { level, previousLevel },
+        fixture.context,
+      );
+    });
+
+    await extension.handlers
+      .get("session_start")
+      ?.({ reason: "resume" }, fixture.context);
+    fixture.context.sessionManager.getBranch = () => [premiumEntry] as any;
+
+    await extension.handlers.get("session_tree")?.({}, fixture.context);
+
+    expect(latestState(extension.pi)).toMatchObject({
+      paused: false,
+      position: "premium",
+    });
+    expect(fixture.notify).not.toHaveBeenCalledWith(
+      "downshift paused: manual model change",
+      "error",
+    );
+  });
+
+  it("continues to downshift after restoring a premium branch", async () => {
+    setConfig({
+      premiumSource: "explicit",
+      premium: target("premium-new", "high"),
+      handoffBeforeDownshift: false,
+    });
+    const premiumEntry = {
+      type: "custom",
+      customType: "downshift-state",
+      data: { position: "premium", handoff: "idle" },
+    };
+    const fixture = createContext(
+      { current: { tokens: 100, percent: 90 } },
+      { model: models[1], thinkingLevel: "high" },
+      [premiumEntry],
+      [premiumEntry],
+    );
+    const extension = createExtension(fixture.active);
+
+    await extension.handlers
+      .get("session_start")
+      ?.({ reason: "resume" }, fixture.context);
+    await extension.handlers.get("context")?.({}, fixture.context);
+
+    expect(extension.setModel).toHaveBeenCalledWith(models[2]);
+    expect(latestState(extension.pi)).toMatchObject({
+      position: "economy",
+      handoff: "done",
+    });
+  });
+
+  it("continues to upshift after restoring an economy branch and compacting", async () => {
+    setConfig({
+      premiumSource: "explicit",
+      premium: target("premium-new", "high"),
+      upshiftAfterCompaction: true,
+    });
+    const economyEntry = {
+      type: "custom",
+      customType: "downshift-state",
+      data: { position: "economy", handoff: "done" },
+    };
+    const fixture = createContext(
+      { current: { tokens: 100, percent: 10 } },
+      { model: models[2], thinkingLevel: "off" },
+      [economyEntry],
+      [economyEntry],
+    );
+    const extension = createExtension(fixture.active);
+
+    await extension.handlers
+      .get("session_start")
+      ?.({ reason: "resume" }, fixture.context);
+    await extension.handlers.get("session_compact")?.(
+      { compactionEntry: {} },
+      fixture.context,
+    );
+
+    expect(extension.setModel).toHaveBeenCalledWith(models[1]);
+    expect(extension.setThinkingLevel).toHaveBeenCalledWith("high");
+    expect(latestState(extension.pi)).toMatchObject({
+      position: "premium",
+      handoff: "idle",
+    });
+  });
+
+  it("does nothing when branch reconciliation already matches the target", async () => {
+    setConfig({
+      premiumSource: "explicit",
+      premium: target("premium-new", "high"),
+      handoffBeforeDownshift: false,
+    });
+    const premiumEntry = {
+      type: "custom",
+      customType: "downshift-state",
+      data: { position: "premium", handoff: "idle" },
+    };
+    const fixture = createContext(
+      { current: { tokens: 100, percent: 10 } },
+      { model: models[1], thinkingLevel: "high" },
+      [premiumEntry],
+      [premiumEntry],
+    );
+    const extension = createExtension(fixture.active);
+
+    await extension.handlers
+      .get("session_start")
+      ?.({ reason: "resume" }, fixture.context);
+    vi.mocked(extension.pi.appendEntry).mockClear();
+    fixture.notify.mockClear();
+
+    await extension.handlers.get("session_tree")?.({}, fixture.context);
+
+    expect(extension.setModel).not.toHaveBeenCalled();
+    expect(extension.setThinkingLevel).not.toHaveBeenCalled();
+    expect(extension.pi.appendEntry).not.toHaveBeenCalled();
+    expect(fixture.notify).not.toHaveBeenCalled();
   });
 
   it("opens configuration for the bare command", async () => {

@@ -22,6 +22,8 @@ import {
   maybeUpshiftAfterCompaction,
   parseTarget,
   formatCompactNumber,
+  reconcilePositionTarget,
+  restoreBranchPhaseFromEntries,
   restoreStateFromEntries,
   statusText,
   thresholdReached,
@@ -29,6 +31,7 @@ import {
   type DownshiftState,
   type ModelTarget,
   type Position,
+  type RestoredBranchPhase,
   type Threshold,
 } from "./downshift-core";
 
@@ -204,6 +207,17 @@ function restoreState(ctx: ExtensionContext): boolean {
   return true;
 }
 
+function restoreActiveBranchPhase(ctx: ExtensionContext): RestoredBranchPhase {
+  const phase = restoreBranchPhaseFromEntries(ctx.sessionManager.getBranch());
+  runtime.state = {
+    ...runtime.state,
+    position: phase.position,
+    handoff: phase.handoff,
+    continueAfterHandoff: false,
+  };
+  return phase;
+}
+
 function pause(
   pi: ExtensionAPI,
   ctx: ExtensionContext,
@@ -270,6 +284,7 @@ function coreDeps(pi: ExtensionAPI, ctx: ExtensionContext) {
     ) => pi.sendUserMessage(prompt, options),
     switchToTarget: (target: ModelTarget, position: Position, reason: string) =>
       switchToTarget(pi, ctx, target, position, reason),
+    getActiveTarget: () => getActiveTarget(pi, ctx),
     updateStatus: (config?: DownshiftConfig) => updateStatus(ctx, config),
     notify: (message: string, level?: string) =>
       ctx.ui.notify(message, level as any),
@@ -902,8 +917,39 @@ async function handleSessionStart(
 ): Promise<void> {
   const hadState = restoreState(ctx);
   const config = await readConfig();
-  if (!hadState) await initializeSessionState(pi, event, ctx, config);
+  if (!hadState) {
+    await initializeSessionState(pi, event, ctx, config);
+  } else {
+    const phase = restoreActiveBranchPhase(ctx);
+    if (phase.interrupted && !runtime.state.paused) {
+      pause(pi, ctx, "handoff interrupted by session restore", {
+        position: phase.position,
+        handoff: phase.handoff,
+        continueAfterHandoff: false,
+      });
+    } else {
+      await reconcilePositionTarget(coreDeps(pi, ctx), runtime, "restored session");
+    }
+  }
   updateStatus(ctx, config);
+}
+
+async function handleSessionTree(
+  pi: ExtensionAPI,
+  ctx: ExtensionContext,
+): Promise<void> {
+  const sourceHandoffPending =
+    runtime.state.handoff === "requested" || runtime.state.handoff === "active";
+  const phase = restoreActiveBranchPhase(ctx);
+  if (sourceHandoffPending || phase.interrupted) {
+    pause(pi, ctx, "handoff interrupted by tree navigation", {
+      position: phase.position,
+      handoff: phase.handoff,
+      continueAfterHandoff: false,
+    });
+    return;
+  }
+  await reconcilePositionTarget(coreDeps(pi, ctx), runtime, "restored branch");
 }
 
 async function initializeSessionState(
@@ -956,6 +1002,10 @@ function hasExplicitStartPremium(
 export default function downshift(pi: ExtensionAPI): void {
   pi.on("session_start", async (event, ctx) => {
     await handleSessionStart(pi, event, ctx);
+  });
+
+  pi.on("session_tree", async (_event, ctx) => {
+    await handleSessionTree(pi, ctx);
   });
 
   pi.on("context", async (_event, ctx) => {
